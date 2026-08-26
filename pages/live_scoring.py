@@ -178,6 +178,7 @@ def get_scores(event_id):
 def save_hole_scores(
     event_id,
     scorer_id,
+    hole_number,
     scores
 ):
 
@@ -209,16 +210,19 @@ def save_hole_scores(
                     )
 
                     DO UPDATE SET
-                        gross_score = EXCLUDED.gross_score,
+                        gross_score =
+                            EXCLUDED.gross_score,
+
                         recorded_by_player_id =
                             EXCLUDED.recorded_by_player_id,
+
                         updated_at =
                             CURRENT_TIMESTAMP
                     """,
                     (
                         int(event_id),
                         int(player_id),
-                        int(scores["hole_number"]),
+                        int(hole_number),
                         int(gross_score),
                         int(scorer_id)
                     )
