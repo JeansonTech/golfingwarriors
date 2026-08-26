@@ -253,13 +253,13 @@ def get_event_holes(event_id):
             ORDER BY
                 hole_number
             """,
-            connection
+            connection,
+            params=(int(event_id),)
         )
 
     finally:
 
         connection.close()
-
 
 def get_scores(event_id):
 
