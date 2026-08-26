@@ -7,11 +7,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 def round_handicap(handicap):
     """
-    Convert an event handicap to the whole-number handicap
-    used for stroke allocation.
-
-    Uses normal half-up rounding rather than Python's
-    banker's rounding.
+    Convert an event handicap to a whole-number handicap
+    for stroke allocation.
     """
 
     value = Decimal(str(handicap))
@@ -24,40 +21,57 @@ def round_handicap(handicap):
     )
 
 
-def strokes_received(handicap, stroke_index):
+def strokes_received(
+    handicap,
+    stroke_index
+):
     """
-    Determine the number of handicap strokes received
-    on a particular hole.
+    Determine handicap strokes received on a hole.
 
-    Positive handicap:
-        10 = one stroke on SI 1-10
-        19 = two strokes on SI 1, one stroke elsewhere
-        42 = three strokes on SI 1-6,
-             two strokes on SI 7-18
-        64 = four strokes on SI 1-10,
-             three strokes on SI 11-18
+    Examples:
 
-    Plus handicap:
-        +1 gives one stroke back on SI 18
-        +2 gives strokes back on SI 18 and 17
+    HCP 10:
+        SI 1-10 = 1 stroke
+        SI 11-18 = 0
+
+    HCP 19:
+        SI 1 = 2 strokes
+        SI 2-18 = 1 stroke
+
+    HCP 42:
+        SI 1-6 = 3 strokes
+        SI 7-18 = 2 strokes
+
+    HCP 64:
+        SI 1-10 = 4 strokes
+        SI 11-18 = 3 strokes
     """
 
-    handicap = round_handicap(handicap)
+    handicap = round_handicap(
+        handicap
+    )
 
-    stroke_index = int(stroke_index)
+    stroke_index = int(
+        stroke_index
+    )
 
     # --------------------------------------------------------
-    # NORMAL HANDICAP
+    # POSITIVE / NORMAL HANDICAP
     # --------------------------------------------------------
 
     if handicap >= 0:
 
         full_rounds = handicap // 18
+
         remainder = handicap % 18
 
         strokes = full_rounds
 
-        if remainder > 0 and stroke_index <= remainder:
+        if (
+            remainder > 0
+            and stroke_index <= remainder
+        ):
+
             strokes += 1
 
         return strokes
@@ -66,20 +80,21 @@ def strokes_received(handicap, stroke_index):
     # PLUS HANDICAP
     # --------------------------------------------------------
 
-    plus_handicap = abs(handicap)
+    plus_handicap = abs(
+        handicap
+    )
 
     full_rounds = plus_handicap // 18
+
     remainder = plus_handicap % 18
 
     strokes = full_rounds
-
-    # Plus strokes are given back starting at SI 18,
-    # then SI 17, SI 16, etc.
 
     if (
         remainder > 0
         and stroke_index > 18 - remainder
     ):
+
         strokes += 1
 
     return -strokes
@@ -95,7 +110,7 @@ def calculate_net_score(
     stroke_index
 ):
     """
-    Calculate the player's net score on a hole.
+    Calculate net score for one hole.
     """
 
     strokes = strokes_received(
@@ -103,7 +118,10 @@ def calculate_net_score(
         stroke_index
     )
 
-    return int(gross_score) - strokes
+    return (
+        int(gross_score)
+        - strokes
+    )
 
 
 def calculate_ips_points(
@@ -113,7 +131,7 @@ def calculate_ips_points(
     stroke_index
 ):
     """
-    Calculate Golfing Warriors IPS points.
+    Golfing Warriors IPS scoring:
 
     Net Eagle or better = 4
     Net Birdie = 3
@@ -128,7 +146,10 @@ def calculate_ips_points(
         stroke_index
     )
 
-    difference = net_score - int(par)
+    difference = (
+        net_score
+        - int(par)
+    )
 
     if difference <= -2:
         return 4
@@ -146,7 +167,7 @@ def calculate_ips_points(
 
 
 # ============================================================
-# PLAYER ROUND CALCULATION
+# PLAYER ROUND
 # ============================================================
 
 def calculate_player_round(
@@ -155,9 +176,9 @@ def calculate_player_round(
     scores
 ):
     """
-    Calculate the current round totals for one player.
+    Calculate a player's current round.
 
-    Returns both complete and partial-round information.
+    Scores can be incomplete during live scoring.
     """
 
     handicap = float(
@@ -181,7 +202,9 @@ def calculate_player_round(
 
         gross = int(gross)
 
-        par = int(hole["par"])
+        par = int(
+            hole["par"]
+        )
 
         stroke_index = int(
             hole["stroke_index"]
@@ -192,7 +215,10 @@ def calculate_player_round(
             stroke_index
         )
 
-        net = gross - strokes
+        net = (
+            gross
+            - strokes
+        )
 
         ips = calculate_ips_points(
             gross,
@@ -213,7 +239,9 @@ def calculate_player_round(
             }
         )
 
-    completed = len(hole_results)
+    completed = len(
+        hole_results
+    )
 
     gross_total = sum(
         h["gross"]
@@ -235,7 +263,8 @@ def calculate_player_round(
     # --------------------------------------------------------
 
     last_6 = [
-        h for h in hole_results
+        h
+        for h in hole_results
         if h["hole"] >= 13
     ]
 
@@ -254,7 +283,8 @@ def calculate_player_round(
     # --------------------------------------------------------
 
     last_3 = [
-        h for h in hole_results
+        h
+        for h in hole_results
         if h["hole"] >= 16
     ]
 
@@ -294,7 +324,9 @@ def calculate_player_round(
     )
 
     return {
-        "player_id": int(player["player_id"]),
+        "player_id": int(
+            player["player_id"]
+        ),
         "name": player["name"],
         "handicap": handicap,
         "completed": completed,
@@ -320,15 +352,16 @@ def rank_completed_players(
     event_format
 ):
     """
-    Rank players after all 18 holes.
+    Rank completed players.
 
     NET:
-        Lower is better.
+        Lowest score wins.
 
     IPS:
-        Higher is better.
+        Highest score wins.
 
-    Tie breakers:
+    Tie-breaks:
+
         1. Main score
         2. Last 6
         3. Last 3
@@ -343,37 +376,39 @@ def rank_completed_players(
 
     if event_format == "NET":
 
-        ordered = sorted(
+        return sorted(
             completed_results,
             key=lambda result: (
                 result["net_total"],
                 result["last_6_net"],
                 result["last_3_net"],
-                result["last_hole_net"]
-                if result["last_hole_net"] is not None
-                else 999
+                (
+                    result["last_hole_net"]
+                    if result["last_hole_net"]
+                    is not None
+                    else 999
+                )
             )
         )
 
-    else:
-
-        ordered = sorted(
-            completed_results,
-            key=lambda result: (
-                -result["ips_total"],
-                -result["last_6_ips"],
-                -result["last_3_ips"],
+    return sorted(
+        completed_results,
+        key=lambda result: (
+            -result["ips_total"],
+            -result["last_6_ips"],
+            -result["last_3_ips"],
+            (
                 -result["last_hole_ips"]
-                if result["last_hole_ips"] is not None
+                if result["last_hole_ips"]
+                is not None
                 else 999
             )
         )
-
-    return ordered
+    )
 
 
 # ============================================================
-# RANKING POINT ALLOCATION
+# RANKING POINTS
 # ============================================================
 
 def allocate_ranking_points(
@@ -384,28 +419,42 @@ def allocate_ranking_points(
     """
     Allocate ranking points.
 
-    Tied players share the average of the points
-    for the positions they occupy.
+    If players are still tied after all tie-breaks,
+    they share the average of the positions occupied.
     """
 
     if not ranked_results:
+
         return []
 
     output = []
 
     index = 0
 
-    while index < len(ranked_results):
+    while index < len(
+        ranked_results
+    ):
 
-        current = ranked_results[index]
+        current = ranked_results[
+            index
+        ]
 
-        tie_group = [current]
+        tie_group = [
+            current
+        ]
 
-        next_index = index + 1
+        next_index = (
+            index + 1
+        )
 
-        while next_index < len(ranked_results):
+        while (
+            next_index
+            < len(ranked_results)
+        ):
 
-            other = ranked_results[next_index]
+            other = ranked_results[
+                next_index
+            ]
 
             if event_format == "NET":
 
@@ -439,17 +488,19 @@ def allocate_ranking_points(
                     == other["last_hole_ips"]
                 )
 
-            if tied:
-
-                tie_group.append(other)
-
-                next_index += 1
-
-            else:
+            if not tied:
 
                 break
 
-        first_position = index + 1
+            tie_group.append(
+                other
+            )
+
+            next_index += 1
+
+        first_position = (
+            index + 1
+        )
 
         last_position = (
             first_position
@@ -473,14 +524,17 @@ def allocate_ranking_points(
         ]
 
         average_points = (
-            sum(points) / len(points)
+            sum(points)
+            / len(points)
             if points
             else 0
         )
 
         for player in tie_group:
 
-            player_copy = player.copy()
+            player_copy = (
+                player.copy()
+            )
 
             player_copy[
                 "final_position"
