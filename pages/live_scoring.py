@@ -261,6 +261,7 @@ def get_event_holes(event_id):
 
         connection.close()
 
+
 def get_scores(event_id):
 
     connection = get_connection()
@@ -462,6 +463,10 @@ def finalize_event(
 
         with connection.cursor() as cursor:
 
+            # ----------------------------------------------
+            # REMOVE EXISTING RESULTS
+            # ----------------------------------------------
+
             cursor.execute(
                 """
                 DELETE FROM event_results
@@ -471,6 +476,10 @@ def finalize_event(
                 (int(event_id),)
             )
 
+
+            # ----------------------------------------------
+            # REMOVE EXISTING RANKING POINTS
+            # ----------------------------------------------
 
             cursor.execute(
                 """
@@ -482,9 +491,9 @@ def finalize_event(
             )
 
 
-            # ------------------------------------------------
+            # ----------------------------------------------
             # SAVE RESULTS
-            # ------------------------------------------------
+            # ----------------------------------------------
 
             for result in final_results:
 
@@ -593,9 +602,9 @@ def finalize_event(
                 )
 
 
-                # --------------------------------------------
+                # ------------------------------------------
                 # SAVE RANKING POINTS
-                # --------------------------------------------
+                # ------------------------------------------
 
                 cursor.execute(
                     """
@@ -637,9 +646,9 @@ def finalize_event(
                 )
 
 
-            # ------------------------------------------------
+            # ----------------------------------------------
             # CLOSE EVENT
-            # ------------------------------------------------
+            # ----------------------------------------------
 
             cursor.execute(
                 """
@@ -996,12 +1005,6 @@ current_hole_key = (
     f"{group_number}"
 )
 
-hole_selector_key = (
-    f"hole_selector_"
-    f"{event_id}_"
-    f"{group_number}"
-)
-
 
 hole_options = list(
     range(1, 19)
@@ -1040,19 +1043,6 @@ if current_hole_key not in st.session_state:
     ] = first_incomplete
 
 
-# ------------------------------------------------------------
-# Keep selector synchronized
-# ------------------------------------------------------------
-
-if hole_selector_key not in st.session_state:
-
-    st.session_state[
-        hole_selector_key
-    ] = st.session_state[
-        current_hole_key
-    ]
-
-
 current_hole = st.session_state[
     current_hole_key
 ]
@@ -1081,9 +1071,9 @@ st.markdown(
 selected_hole = st.selectbox(
     "Jump to hole",
     hole_options,
+    index=current_hole - 1,
     format_func=lambda hole:
-        f"Hole {hole}",
-    key=hole_selector_key
+        f"Hole {hole}"
 )
 
 
@@ -1094,6 +1084,8 @@ if selected_hole != current_hole:
     ] = selected_hole
 
     current_hole = selected_hole
+
+    st.rerun()
 
 
 # ============================================================
@@ -1363,18 +1355,20 @@ if status == "LIVE":
         use_container_width=True
     ):
 
+        hole_being_saved = current_hole
+
         try:
 
             save_hole_scores(
                 event_id,
                 scorer_id,
-                current_hole,
+                hole_being_saved,
                 entered_scores
             )
 
 
             # ------------------------------------------------
-            # Clear current hole's temporary score state
+            # Clear temporary score state for saved hole
             # ------------------------------------------------
 
             for player in group_players:
@@ -1383,7 +1377,7 @@ if status == "LIVE":
                     f"mobile_score_"
                     f"{event_id}_"
                     f"{group_number}_"
-                    f"{current_hole}_"
+                    f"{hole_being_saved}_"
                     f"{player['player_id']}"
                 )
 
@@ -1398,22 +1392,13 @@ if status == "LIVE":
             # Move to next hole
             # ------------------------------------------------
 
-            if current_hole < 18:
-
-                next_hole = (
-                    current_hole + 1
-                )
+            if hole_being_saved < 18:
 
                 st.session_state[
                     current_hole_key
-                ] = next_hole
-
-                # IMPORTANT:
-                # Keep selectbox synchronized
-
-                st.session_state[
-                    hole_selector_key
-                ] = next_hole
+                ] = (
+                    hole_being_saved + 1
+                )
 
             else:
 
@@ -1421,13 +1406,9 @@ if status == "LIVE":
                     current_hole_key
                 ] = 18
 
-                st.session_state[
-                    hole_selector_key
-                ] = 18
-
 
             st.success(
-                f"✅ Hole {current_hole} saved!"
+                f"✅ Hole {hole_being_saved} saved!"
             )
 
             st.rerun()
@@ -1581,17 +1562,9 @@ with previous_col:
             use_container_width=True
         ):
 
-            previous_hole = (
-                current_hole - 1
-            )
-
             st.session_state[
                 current_hole_key
-            ] = previous_hole
-
-            st.session_state[
-                hole_selector_key
-            ] = previous_hole
+            ] = current_hole - 1
 
             st.rerun()
 
@@ -1605,17 +1578,9 @@ with next_col:
             use_container_width=True
         ):
 
-            next_hole = (
-                current_hole + 1
-            )
-
             st.session_state[
                 current_hole_key
-            ] = next_hole
-
-            st.session_state[
-                hole_selector_key
-            ] = next_hole
+            ] = current_hole + 1
 
             st.rerun()
 
