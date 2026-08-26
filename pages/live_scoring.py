@@ -11,6 +11,7 @@ from scoring.scoring_engine import (
     allocate_ranking_points
 )
 
+
 st.set_page_config(
     page_title="Golfing Warriors - Live Scoring",
     page_icon="📱",
@@ -177,6 +178,10 @@ def get_scores(event_id):
         connection.close()
 
 
+# ============================================================
+# SAVE HOLE SCORES
+# ============================================================
+
 def save_hole_scores(
     event_id,
     scorer_id,
@@ -243,25 +248,278 @@ def save_hole_scores(
         connection.close()
 
 
-def set_pending_close(event_id):
+# ============================================================
+# FINALIZE EVENT
+# ============================================================
+
+def finalize_event(
+    event_id,
+    event_format,
+    players,
+    holes,
+    score_dicts
+):
 
     connection = get_connection()
 
     try:
 
+        # ----------------------------------------------------
+        # CALCULATE ALL PLAYERS
+        # ----------------------------------------------------
+
+        round_results = []
+
+        for player in players:
+
+            result = calculate_player_round(
+                player,
+                holes,
+                score_dicts[
+                    player["player_id"]
+                ]
+            )
+
+            if result["completed"] != 18:
+
+                raise ValueError(
+                    f"{result['name']} has not "
+                    f"completed all 18 holes."
+                )
+
+            round_results.append(
+                result
+            )
+
+        # ----------------------------------------------------
+        # RANK PLAYERS
+        # ----------------------------------------------------
+
+        ranked_results = rank_completed_players(
+            round_results,
+            event_format
+        )
+
+        # ----------------------------------------------------
+        # GET RANKING POINT SETTINGS
+        # ----------------------------------------------------
+
+        ranking_df = pd.read_sql_query(
+            """
+            SELECT
+                position,
+                points
+            FROM ranking_settings
+            WHERE active = TRUE
+            ORDER BY position
+            """,
+            connection
+        )
+
+        ranking_points = {
+            int(row["position"]):
+                float(row["points"])
+            for _, row in ranking_df.iterrows()
+        }
+
+        # ----------------------------------------------------
+        # ALLOCATE RANKING POINTS
+        # ----------------------------------------------------
+
+        final_results = allocate_ranking_points(
+            ranked_results,
+            ranking_points,
+            event_format
+        )
+
+        # ----------------------------------------------------
+        # DATABASE TRANSACTION
+        # ----------------------------------------------------
+
         with connection.cursor() as cursor:
+
+            # ----------------------------------------------
+            # DELETE EXISTING RESULTS
+            # ----------------------------------------------
+
+            cursor.execute(
+                """
+                DELETE FROM event_results
+                WHERE event_id = %s
+                """,
+                (int(event_id),)
+            )
+
+            # ----------------------------------------------
+            # DELETE EXISTING RANKING POINTS
+            # ----------------------------------------------
+
+            cursor.execute(
+                """
+                DELETE FROM ranking_points
+                WHERE event_id = %s
+                """,
+                (int(event_id),)
+            )
+
+            # ----------------------------------------------
+            # SAVE FINAL RESULTS
+            # ----------------------------------------------
+
+            for result in final_results:
+
+                last_6_score = (
+                    result["last_6_net"]
+                    if event_format == "NET"
+                    else result["last_6_ips"]
+                )
+
+                last_3_score = (
+                    result["last_3_net"]
+                    if event_format == "NET"
+                    else result["last_3_ips"]
+                )
+
+                last_hole_score = (
+                    result["last_hole_net"]
+                    if event_format == "NET"
+                    else result["last_hole_ips"]
+                )
+
+                cursor.execute(
+                    """
+                    INSERT INTO event_results
+                        (
+                            event_id,
+                            player_id,
+                            gross_total,
+                            net_total,
+                            ips_total,
+                            last_6_score,
+                            last_3_score,
+                            last_hole_score,
+                            final_position,
+                            ranking_points
+                        )
+                    VALUES
+                        (
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s
+                        )
+                    """,
+                    (
+                        int(event_id),
+
+                        int(
+                            result["player_id"]
+                        ),
+
+                        int(
+                            result["gross_total"]
+                        ),
+
+                        int(
+                            result["net_total"]
+                        ),
+
+                        int(
+                            result["ips_total"]
+                        ),
+
+                        int(
+                            last_6_score
+                        ),
+
+                        int(
+                            last_3_score
+                        ),
+
+                        int(
+                            last_hole_score
+                        ),
+
+                        int(
+                            result[
+                                "final_position"
+                            ]
+                        ),
+
+                        float(
+                            result[
+                                "ranking_points"
+                            ]
+                        )
+                    )
+                )
+
+                # ------------------------------------------
+                # SAVE RANKING POINTS
+                # ------------------------------------------
+
+                cursor.execute(
+                    """
+                    INSERT INTO ranking_points
+                        (
+                            season_id,
+                            event_id,
+                            player_id,
+                            points
+                        )
+                    SELECT
+                        season_id,
+                        %s,
+                        %s,
+                        %s
+                    FROM events
+                    WHERE id = %s
+                    """,
+                    (
+                        int(event_id),
+
+                        int(
+                            result["player_id"]
+                        ),
+
+                        float(
+                            result[
+                                "ranking_points"
+                            ]
+                        ),
+
+                        int(event_id)
+                    )
+                )
+
+            # ----------------------------------------------
+            # CLOSE EVENT
+            # ----------------------------------------------
 
             cursor.execute(
                 """
                 UPDATE events
-                SET status = 'PENDING_CLOSE'
+                SET
+                    status = 'CLOSED',
+                    closed_at = CURRENT_TIMESTAMP
                 WHERE id = %s
-                AND status = 'LIVE'
+                AND status IN (
+                    'LIVE',
+                    'PENDING_CLOSE'
+                )
                 """,
                 (int(event_id),)
             )
 
         connection.commit()
+
+        return final_results
 
     except Exception:
 
@@ -303,15 +561,19 @@ if events.empty:
     st.stop()
 
 
-event_options = {
-    (
+event_options = {}
+
+for _, row in events.iterrows():
+
+    label = (
         f"{row['name']} — "
         f"{row['event_date']} — "
         f"{row['format']}"
-    ):
-        int(row["id"])
-    for _, row in events.iterrows()
-}
+    )
+
+    event_options[
+        label
+    ] = int(row["id"])
 
 
 selected_event_label = st.selectbox(
@@ -323,16 +585,30 @@ event_id = event_options[
     selected_event_label
 ]
 
-event = get_event(event_id).iloc[0]
+
+event_df = get_event(
+    event_id
+)
+
+if event_df.empty:
+
+    st.error(
+        "Unable to find this event."
+    )
+
+    st.stop()
+
+
+event = event_df.iloc[0]
 
 event_format = event["format"]
+
+status = event["status"]
 
 
 # ============================================================
 # EVENT HEADER
 # ============================================================
-
-status = event["status"]
 
 if status == "LIVE":
 
@@ -340,7 +616,7 @@ if status == "LIVE":
         f"🟢 {event['name']} — LIVE"
     )
 
-else:
+elif status == "PENDING_CLOSE":
 
     st.warning(
         f"🏁 {event['name']} — PENDING CLOSE"
@@ -413,26 +689,35 @@ for _, player in players_df.iterrows():
 
     players.append(
         {
-            "player_id": int(
-                player["player_id"]
-            ),
-            "name": player["name"],
-            "nickname": (
-                player["nickname"]
-                if pd.notna(
+            "player_id":
+                int(player["player_id"]),
+
+            "name":
+                player["name"],
+
+            "nickname":
+                (
                     player["nickname"]
+                    if pd.notna(
+                        player["nickname"]
+                    )
+                    else ""
+                ),
+
+            "event_handicap":
+                float(
+                    player["event_handicap"]
+                ),
+
+            "group_number":
+                int(
+                    player["group_number"]
+                ),
+
+            "is_scorer":
+                bool(
+                    player["is_scorer"]
                 )
-                else ""
-            ),
-            "event_handicap": float(
-                player["event_handicap"]
-            ),
-            "group_number": int(
-                player["group_number"]
-            ),
-            "is_scorer": bool(
-                player["is_scorer"]
-            )
         }
     )
 
@@ -454,7 +739,10 @@ for _, row in scores_df.iterrows():
     )
 
     score_lookup[
-        (player_id, hole_number)
+        (
+            player_id,
+            hole_number
+        )
     ] = int(
         row["gross_score"]
     )
@@ -466,7 +754,9 @@ for _, row in scores_df.iterrows():
 
 st.divider()
 
-st.subheader("📝 Select Scorer")
+st.subheader(
+    "📝 Select Scorer"
+)
 
 scorers = [
     player
@@ -484,19 +774,26 @@ if not scorers:
     st.stop()
 
 
-scorer_options = {
-    (
+scorer_options = {}
+
+for player in scorers:
+
+    label = (
         f"{player['name']} "
-        f"— Fourball {player['group_number']}"
-    ):
-        player
-    for player in scorers
-}
+        f"— Fourball "
+        f"{player['group_number']}"
+    )
+
+    scorer_options[
+        label
+    ] = player
 
 
 selected_scorer_label = st.selectbox(
     "Who is doing the scoring?",
-    list(scorer_options.keys())
+    list(
+        scorer_options.keys()
+    )
 )
 
 selected_scorer = scorer_options[
@@ -536,16 +833,27 @@ st.success(
 
 st.divider()
 
-st.subheader("⛳ Hole")
+st.subheader(
+    "⛳ Hole"
+)
 
 hole_options = list(
     range(1, 19)
 )
 
+
+current_hole_key = (
+    f"current_hole_"
+    f"{event_id}_"
+    f"{group_number}"
+)
+
+
 current_hole = st.session_state.get(
-    f"current_hole_{event_id}_{group_number}",
+    current_hole_key,
     1
 )
+
 
 selected_hole = st.selectbox(
     "Select Hole",
@@ -557,7 +865,7 @@ selected_hole = st.selectbox(
 
 
 st.session_state[
-    f"current_hole_{event_id}_{group_number}"
+    current_hole_key
 ] = selected_hole
 
 
@@ -579,6 +887,7 @@ stroke_index = int(
 st.markdown(
     f"## Hole {selected_hole}"
 )
+
 
 hole_col1, hole_col2 = st.columns(2)
 
@@ -615,9 +924,12 @@ st.caption(
 
 entered_scores = {}
 
+
 for player in group_players:
 
-    player_id = player["player_id"]
+    player_id = player[
+        "player_id"
+    ]
 
     previous_score = score_lookup.get(
         (
@@ -636,7 +948,9 @@ for player in group_players:
         player["name"],
         min_value=1,
         max_value=20,
-        value=int(default_score),
+        value=int(
+            default_score
+        ),
         step=1,
         key=(
             f"score_"
@@ -653,7 +967,7 @@ for player in group_players:
 
 
 # ============================================================
-# PREVIEW
+# HOLE PREVIEW
 # ============================================================
 
 st.divider()
@@ -661,6 +975,7 @@ st.divider()
 st.subheader(
     "📊 Hole Preview"
 )
+
 
 preview_rows = []
 
@@ -686,11 +1001,20 @@ for player in group_players:
 
     preview_rows.append(
         {
-            "Player": player["name"],
-            "HCP": player["event_handicap"],
-            "Gross": gross,
-            "Net": net,
-            "IPS": ips
+            "Player":
+                player["name"],
+
+            "HCP":
+                player["event_handicap"],
+
+            "Gross":
+                gross,
+
+            "Net":
+                net,
+
+            "IPS":
+                ips
         }
     )
 
@@ -698,6 +1022,7 @@ for player in group_players:
 preview_df = pd.DataFrame(
     preview_rows
 )
+
 
 st.dataframe(
     preview_df,
@@ -711,6 +1036,7 @@ st.dataframe(
 # ============================================================
 
 st.divider()
+
 
 if status == "LIVE":
 
@@ -734,15 +1060,13 @@ if status == "LIVE":
             )
 
             # -----------------------------------------------
-            # Move to next hole
+            # ADVANCE TO NEXT HOLE
             # -----------------------------------------------
 
             if selected_hole < 18:
 
                 st.session_state[
-                    f"current_hole_"
-                    f"{event_id}_"
-                    f"{group_number}"
+                    current_hole_key
                 ] = selected_hole + 1
 
             st.rerun()
@@ -763,25 +1087,21 @@ else:
 
 
 # ============================================================
-# LIVE LEADERBOARD
-# ============================================================
-
-st.divider()
-
-st.header("🏆 Live Leaderboard")
-
-
-# ============================================================
 # BUILD SCORE DICTIONARIES
 # ============================================================
 
 score_dicts = {}
 
+
 for player in players:
 
-    player_id = player["player_id"]
+    player_id = player[
+        "player_id"
+    ]
 
-    score_dicts[player_id] = {}
+    score_dicts[
+        player_id
+    ] = {}
 
     for hole_number in hole_options:
 
@@ -800,10 +1120,11 @@ for player in players:
 
 
 # ============================================================
-# CALCULATE PLAYER ROUNDS
+# CALCULATE LIVE ROUND RESULTS
 # ============================================================
 
 round_results = []
+
 
 for player in players:
 
@@ -823,8 +1144,15 @@ for player in players:
 
 
 # ============================================================
-# DISPLAY LEADERBOARD
+# LIVE LEADERBOARD
 # ============================================================
+
+st.divider()
+
+st.header(
+    "🏆 Live Leaderboard"
+)
+
 
 if event_format == "IPS":
 
@@ -855,6 +1183,7 @@ else:
 
 leaderboard_rows = []
 
+
 for position, result in enumerate(
     sorted_results,
     start=1
@@ -862,12 +1191,18 @@ for position, result in enumerate(
 
     leaderboard_rows.append(
         {
-            "Pos": position,
-            "Player": result["name"],
-            "HCP": result["handicap"],
-            "Holes": (
-                f"{result['completed']}/18"
-            ),
+            "Pos":
+                position,
+
+            "Player":
+                result["name"],
+
+            "HCP":
+                result["handicap"],
+
+            "Holes":
+                f"{result['completed']}/18",
+
             score_column:
                 (
                     result["ips_total"]
@@ -881,6 +1216,7 @@ for position, result in enumerate(
 leaderboard_df = pd.DataFrame(
     leaderboard_rows
 )
+
 
 st.dataframe(
     leaderboard_df,
@@ -909,32 +1245,112 @@ if all_complete:
 
     if status == "LIVE":
 
+        st.warning(
+            "⚠️ Finalizing this event will "
+            "lock the scores and award official "
+            "ranking points."
+        )
+
         if st.button(
-            "🏁 Finish Scoring / Lock Round",
+            "🏆 FINALIZE & CLOSE EVENT",
             type="primary",
             use_container_width=True
         ):
 
             try:
 
-                set_pending_close(
-                    event_id
+                final_results = finalize_event(
+                    event_id,
+                    event_format,
+                    players,
+                    holes_df.to_dict(
+                        "records"
+                    ),
+                    score_dicts
                 )
 
                 st.success(
-                    "Scoring has been locked. "
-                    "The event is now pending close."
+                    "🏆 Event finalized successfully!"
                 )
 
-                st.rerun()
+                st.balloons()
+
+                st.subheader(
+                    "🏆 Official Results"
+                )
+
+                result_rows = []
+
+                for result in final_results:
+
+                    result_rows.append(
+                        {
+                            "Position":
+                                result[
+                                    "final_position"
+                                ],
+
+                            "Player":
+                                result["name"],
+
+                            "Gross":
+                                result[
+                                    "gross_total"
+                                ],
+
+                            "Net":
+                                result[
+                                    "net_total"
+                                ],
+
+                            "IPS":
+                                result[
+                                    "ips_total"
+                                ],
+
+                            "Ranking Points":
+                                result[
+                                    "ranking_points"
+                                ]
+                        }
+                    )
+
+
+                results_display = pd.DataFrame(
+                    result_rows
+                )
+
+
+                st.dataframe(
+                    results_display,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+
+                st.info(
+                    "🔒 This event is now CLOSED. "
+                    "Scores can no longer be edited."
+                )
+
+                st.stop()
+
 
             except Exception as error:
 
                 st.error(
-                    "Unable to lock the round."
+                    "Unable to finalize the event."
                 )
 
                 st.exception(error)
+
+
+    elif status == "PENDING_CLOSE":
+
+        st.info(
+            "This event is already pending close."
+        )
+
 
 else:
 
@@ -947,13 +1363,16 @@ else:
         if result["completed"] < 18
     ]
 
+
     st.info(
         "Round still in progress."
     )
 
+
     st.write(
         "Incomplete players:"
     )
+
 
     for name, completed in incomplete:
 
