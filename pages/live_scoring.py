@@ -1149,21 +1149,11 @@ stroke_index = int(
 
 
 st.markdown(
-    f"""
-    <div class="hole-header">
+    f"## ⛳ HOLE {current_hole}"
+)
 
-        <div class="hole-title">
-            ⛳ HOLE {current_hole}
-        </div>
-
-        <div class="hole-subtitle">
-            PAR {par} &nbsp;•&nbsp;
-            STROKE INDEX {stroke_index}
-        </div>
-
-    </div>
-    """,
-    unsafe_allow_html=True
+st.caption(
+    f"PAR {par}  •  STROKE INDEX {stroke_index}"
 )
 
 
