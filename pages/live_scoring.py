@@ -70,6 +70,18 @@ st.markdown(
         margin-bottom: 12px;
     }
 
+    .progress-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+
+    .progress-caption {
+        font-size: 0.9rem;
+        opacity: 0.75;
+        margin-bottom: 10px;
+    }
+
     div.stButton > button {
         min-height: 48px;
         font-weight: 700;
@@ -1046,6 +1058,115 @@ if current_hole_key not in st.session_state:
 current_hole = st.session_state[
     current_hole_key
 ]
+
+
+# ============================================================
+# 18-HOLE PROGRESS INDICATOR
+# ============================================================
+
+st.divider()
+
+completed_holes = 0
+
+
+hole_completed = {}
+
+
+for test_hole in hole_options:
+
+    complete = True
+
+    for player in group_players:
+
+        if (
+            player["player_id"],
+            test_hole
+        ) not in score_lookup:
+
+            complete = False
+            break
+
+    hole_completed[
+        test_hole
+    ] = complete
+
+    if complete:
+
+        completed_holes += 1
+
+
+st.markdown(
+    """
+    <div class="progress-title">
+        ⛳ Round Progress
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.caption(
+    f"{completed_holes} / 18 holes completed"
+)
+
+
+# ------------------------------------------------------------
+# Progress hole buttons
+# ------------------------------------------------------------
+
+for row_start in range(1, 19, 6):
+
+    progress_cols = st.columns(6)
+
+    for offset in range(6):
+
+        hole_number = row_start + offset
+
+        if hole_number > 18:
+
+            continue
+
+        with progress_cols[offset]:
+
+            if (
+                hole_number
+                == current_hole
+            ):
+
+                button_text = (
+                    f"🔵 {hole_number}"
+                )
+
+            elif hole_completed[
+                hole_number
+            ]:
+
+                button_text = (
+                    f"✅ {hole_number}"
+                )
+
+            else:
+
+                button_text = (
+                    str(hole_number)
+                )
+
+
+            if st.button(
+                button_text,
+                key=(
+                    f"progress_hole_"
+                    f"{event_id}_"
+                    f"{group_number}_"
+                    f"{hole_number}"
+                ),
+                use_container_width=True
+            ):
+
+                st.session_state[
+                    current_hole_key
+                ] = hole_number
+
+                st.rerun()
 
 
 # ============================================================
