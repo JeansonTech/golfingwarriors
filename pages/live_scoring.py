@@ -1124,14 +1124,8 @@ selected_hole = st.selectbox(
     hole_options,
     index=current_hole - 1,
     format_func=lambda hole:
-        f"Hole {hole}",
-    key=(
-        f"hole_selector_"
-        f"{event_id}_"
-        f"{group_number}"
-    )
+        f"Hole {hole}"
 )
-
 
 if selected_hole != current_hole:
 
@@ -1242,21 +1236,20 @@ for player in group_players:
     # Player card
     # --------------------------------------------------------
 
-    st.markdown(
+       st.markdown(
         f"""
         <div class="score-card">
             <div class="player-name">
                 {player['name']}
-            </div>
-
-            <div class="player-info">
-                HCP {player['event_handicap']:g}
             </div>
         </div>
         """,
         unsafe_allow_html=True
     )
 
+    st.caption(
+        f"HCP {player['event_handicap']:g}"
+    )
 
     score_col1, score_col2, score_col3 = st.columns(
         [1, 2, 1]
