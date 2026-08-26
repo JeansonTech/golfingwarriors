@@ -4,6 +4,17 @@ import pandas as pd
 from database import get_connection
 
 
+st.set_page_config(
+    page_title="Golfing Warriors - Events",
+    page_icon="🏌️",
+    layout="wide"
+)
+
+
+# ============================================================
+# DATABASE FUNCTIONS
+# ============================================================
+
 def get_active_season():
 
     connection = get_connection()
@@ -27,6 +38,7 @@ def get_active_season():
         return result
 
     finally:
+
         connection.close()
 
 
@@ -51,14 +63,64 @@ def get_active_players():
         )
 
     finally:
+
+        connection.close()
+
+
+def get_courses():
+
+    connection = get_connection()
+
+    try:
+
+        return pd.read_sql_query(
+            """
+            SELECT
+                id,
+                name,
+                location
+            FROM courses
+            WHERE active = TRUE
+            ORDER BY name
+            """,
+            connection
+        )
+
+    finally:
+
+        connection.close()
+
+
+def get_course_holes(course_id):
+
+    connection = get_connection()
+
+    try:
+
+        return pd.read_sql_query(
+            """
+            SELECT
+                hole_number,
+                par,
+                stroke_index
+            FROM course_holes
+            WHERE course_id = %s
+            ORDER BY hole_number
+            """,
+            connection,
+            params=(int(course_id),)
+        )
+
+    finally:
+
         connection.close()
 
 
 def create_event(
     season_id,
+    course_id,
     name,
     event_date,
-    course,
     event_format
 ):
 
@@ -68,14 +130,18 @@ def create_event(
 
         with connection.cursor() as cursor:
 
+            # -------------------------------------------------
+            # CREATE EVENT
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 INSERT INTO events
                     (
                         season_id,
+                        course_id,
                         name,
                         event_date,
-                        course,
                         format
                     )
                 VALUES
@@ -84,21 +150,49 @@ def create_event(
                 """,
                 (
                     int(season_id),
+                    int(course_id),
                     name.strip(),
                     event_date,
-                    course.strip()
-                    if course else None,
                     event_format
                 )
             )
 
             event_id = cursor.fetchone()[0]
 
+            # -------------------------------------------------
+            # COPY COURSE HOLES INTO EVENT
+            # -------------------------------------------------
+
+            cursor.execute(
+                """
+                INSERT INTO event_holes
+                    (
+                        event_id,
+                        hole_number,
+                        par,
+                        stroke_index
+                    )
+                SELECT
+                    %s,
+                    hole_number,
+                    par,
+                    stroke_index
+                FROM course_holes
+                WHERE course_id = %s
+                ORDER BY hole_number
+                """,
+                (
+                    int(event_id),
+                    int(course_id)
+                )
+            )
+
         connection.commit()
 
         return int(event_id)
 
     finally:
+
         connection.close()
 
 
@@ -140,6 +234,66 @@ def add_event_players(
         connection.commit()
 
     finally:
+
+        connection.close()
+
+
+def get_events():
+
+    connection = get_connection()
+
+    try:
+
+        return pd.read_sql_query(
+            """
+            SELECT
+                e.id,
+                e.name,
+                e.event_date,
+                e.format,
+                e.status,
+                s.name AS season_name,
+                c.name AS course_name
+            FROM events e
+
+            INNER JOIN seasons s
+                ON e.season_id = s.id
+
+            LEFT JOIN courses c
+                ON e.course_id = c.id
+
+            ORDER BY e.event_date DESC
+            """,
+            connection
+        )
+
+    finally:
+
+        connection.close()
+
+
+def start_event(event_id):
+
+    connection = get_connection()
+
+    try:
+
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                UPDATE events
+                SET status = 'LIVE'
+                WHERE id = %s
+                AND status = 'DRAFT'
+                """,
+                (int(event_id),)
+            )
+
+        connection.commit()
+
+    finally:
+
         connection.close()
 
 
@@ -150,7 +304,7 @@ def add_event_players(
 st.title("🏌️ Events")
 
 st.caption(
-    "Create and configure Golfing Warriors events."
+    "Create and manage Golfing Warriors events."
 )
 
 st.divider()
@@ -181,6 +335,27 @@ st.success(
 
 
 # ============================================================
+# COURSES
+# ============================================================
+
+courses = get_courses()
+
+if courses.empty:
+
+    st.warning(
+        "You need to create a golf course "
+        "before creating an event."
+    )
+
+    st.info(
+        "Go to the ⛳ Courses page and add "
+        "your first course."
+    )
+
+    st.stop()
+
+
+# ============================================================
 # PLAYERS
 # ============================================================
 
@@ -203,17 +378,38 @@ st.subheader("1️⃣ Event Details")
 
 event_name = st.text_input(
     "Event Name",
-    placeholder="e.g. Golfing Warriors Event #1"
+    placeholder="e.g. Golfing Warriors Event #2"
 )
 
 event_date = st.date_input(
     "Event Date"
 )
 
-course = st.text_input(
+
+# Course selection
+
+course_options = {}
+
+for _, course in courses.iterrows():
+
+    label = course["name"]
+
+    if pd.notna(course["location"]):
+
+        label += f" — {course['location']}"
+
+    course_options[label] = course
+
+
+selected_course_label = st.selectbox(
     "Golf Course",
-    placeholder="e.g. Mokopane Golf Club"
+    list(course_options.keys())
 )
+
+selected_course = course_options[
+    selected_course_label
+]
+
 
 event_format = st.radio(
     "Competition Format",
@@ -223,6 +419,43 @@ event_format = st.radio(
     ],
     horizontal=True
 )
+
+
+# ============================================================
+# COURSE PREVIEW
+# ============================================================
+
+course_holes = get_course_holes(
+    selected_course["id"]
+)
+
+if len(course_holes) != 18:
+
+    st.error(
+        "This course does not have exactly "
+        "18 holes configured."
+    )
+
+    st.stop()
+
+
+with st.expander(
+    "⛳ View Course Hole Information"
+):
+
+    course_display = course_holes.copy()
+
+    course_display.columns = [
+        "Hole",
+        "Par",
+        "Stroke Index"
+    ]
+
+    st.dataframe(
+        course_display,
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 st.divider()
@@ -245,7 +478,8 @@ for _, player in players.iterrows():
         label += f" ({player['nickname']})"
 
     label += (
-        f" — HCP {player['current_handicap']:g}"
+        f" — HCP "
+        f"{float(player['current_handicap']):g}"
     )
 
     player_labels[label] = player
@@ -281,8 +515,8 @@ st.divider()
 st.subheader("3️⃣ Create Fourballs")
 
 st.caption(
-    "Choose the group number and scorer for "
-    "each player."
+    "Each group can have a maximum of four players "
+    "and must have exactly one scorer."
 )
 
 event_players = []
@@ -321,13 +555,13 @@ for index, player in enumerate(
 
     event_players.append(
         {
-            "player_id": player["id"],
+            "player_id": int(player["id"]),
             "name": player["name"],
             "handicap": float(
                 player["current_handicap"]
             ),
             "group_number": int(group),
-            "is_scorer": scorer
+            "is_scorer": bool(scorer)
         }
     )
 
@@ -342,9 +576,8 @@ st.divider()
 st.subheader("4️⃣ Event Handicaps")
 
 st.caption(
-    "These are the handicaps that will actually "
-    "be used for this event. You can change them "
-    "without changing the player's normal handicap."
+    "These handicaps are stored specifically "
+    "for this event."
 )
 
 final_event_players = []
@@ -360,7 +593,7 @@ for player in event_players:
         key=f"hcp_{player['player_id']}"
     )
 
-    player["handicap"] = handicap
+    player["handicap"] = float(handicap)
 
     final_event_players.append(player)
 
@@ -373,9 +606,6 @@ st.divider()
 # ============================================================
 
 errors = []
-
-
-# Check every group has a scorer
 
 groups = {}
 
@@ -447,9 +677,9 @@ else:
 
             event_id = create_event(
                 active_season["id"],
+                selected_course["id"],
                 event_name,
                 event_date,
-                course,
                 event_format
             )
 
@@ -459,15 +689,15 @@ else:
             )
 
             st.success(
-                f"Event created successfully! "
-                f"Event #{event_id}"
+                f"Event #{event_id} created successfully!"
             )
 
             st.info(
-                "The event has been created as "
-                "**DRAFT**. Live scoring will be "
-                "added in the next stage."
+                "The event is currently **DRAFT**. "
+                "Review everything before starting it."
             )
+
+            st.rerun()
 
         except Exception as error:
 
@@ -476,3 +706,89 @@ else:
             )
 
             st.exception(error)
+
+
+# ============================================================
+# EXISTING EVENTS
+# ============================================================
+
+st.divider()
+
+st.subheader("📋 Existing Events")
+
+events = get_events()
+
+if events.empty:
+
+    st.info(
+        "No events have been created yet."
+    )
+
+else:
+
+    for _, event in events.iterrows():
+
+        if event["status"] == "DRAFT":
+
+            status = "📝 DRAFT"
+
+        elif event["status"] == "LIVE":
+
+            status = "🟢 LIVE"
+
+        elif event["status"] == "PENDING_CLOSE":
+
+            status = "🏁 PENDING CLOSE"
+
+        else:
+
+            status = "🔒 CLOSED"
+
+
+        st.markdown(
+            f"### {event['name']}"
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+
+            st.write(
+                f"📅 {event['event_date']}"
+            )
+
+        with col2:
+
+            st.write(
+                f"⛳ {event['course_name']}"
+            )
+
+        with col3:
+
+            st.write(
+                f"🏆 {event['format']}"
+            )
+
+        with col4:
+
+            st.write(status)
+
+
+        if event["status"] == "DRAFT":
+
+            if st.button(
+                "🟢 Start Event",
+                key=f"start_{event['id']}"
+            ):
+
+                start_event(
+                    event["id"]
+                )
+
+                st.success(
+                    "Event is now LIVE!"
+                )
+
+                st.rerun()
+
+        st.divider()
