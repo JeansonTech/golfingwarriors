@@ -5,6 +5,7 @@ from psycopg2.extras import RealDictCursor
 
 def get_connection():
     """Create and return a PostgreSQL database connection."""
+
     database_url = os.getenv("DATABASE_URL")
 
     if not database_url:
@@ -21,6 +22,7 @@ def init_database():
     connection = get_connection()
 
     try:
+
         with connection.cursor() as cursor:
 
             # =====================================================
@@ -32,13 +34,10 @@ def init_database():
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(100) NOT NULL,
                     nickname VARCHAR(100),
-                    current_handicap NUMERIC(5,1)
-                        CHECK (
-                            current_handicap >= -10
-                            AND current_handicap <= 64
-                        ),
+                    current_handicap NUMERIC(5,1),
                     active BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP NOT NULL
+                        DEFAULT CURRENT_TIMESTAMP
                 );
             """)
 
@@ -52,7 +51,50 @@ def init_database():
                     name VARCHAR(100) NOT NULL,
                     year INTEGER NOT NULL,
                     active BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP NOT NULL
+                        DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # =====================================================
+            # COURSES
+            # =====================================================
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS courses (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(150) NOT NULL,
+                    location VARCHAR(150),
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP NOT NULL
+                        DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # =====================================================
+            # COURSE HOLES
+            # =====================================================
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS course_holes (
+                    id SERIAL PRIMARY KEY,
+
+                    course_id INTEGER NOT NULL
+                        REFERENCES courses(id)
+                        ON DELETE CASCADE,
+
+                    hole_number INTEGER NOT NULL
+                        CHECK (hole_number BETWEEN 1 AND 18),
+
+                    par INTEGER NOT NULL
+                        CHECK (par BETWEEN 3 AND 6),
+
+                    stroke_index INTEGER NOT NULL
+                        CHECK (stroke_index BETWEEN 1 AND 18),
+
+                    UNIQUE(course_id, hole_number),
+
+                    UNIQUE(course_id, stroke_index)
                 );
             """)
 
@@ -63,14 +105,24 @@ def init_database():
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     id SERIAL PRIMARY KEY,
+
                     season_id INTEGER NOT NULL
                         REFERENCES seasons(id),
+
+                    course_id INTEGER
+                        REFERENCES courses(id),
+
                     name VARCHAR(150) NOT NULL,
+
                     event_date DATE NOT NULL,
+
                     course VARCHAR(150),
+
                     format VARCHAR(20) NOT NULL
                         CHECK (format IN ('NET', 'IPS')),
-                    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
+
+                    status VARCHAR(20) NOT NULL
+                        DEFAULT 'DRAFT'
                         CHECK (
                             status IN (
                                 'DRAFT',
@@ -79,8 +131,48 @@ def init_database():
                                 'CLOSED'
                             )
                         ),
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                    created_at TIMESTAMP NOT NULL
+                        DEFAULT CURRENT_TIMESTAMP,
+
                     closed_at TIMESTAMP
+                );
+            """)
+
+            # =====================================================
+            # MIGRATION FOR EXISTING EVENTS
+            # =====================================================
+
+            cursor.execute("""
+                ALTER TABLE events
+                ADD COLUMN IF NOT EXISTS course_id INTEGER
+                REFERENCES courses(id);
+            """)
+
+            # =====================================================
+            # EVENT HOLES
+            # =====================================================
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS event_holes (
+                    id SERIAL PRIMARY KEY,
+
+                    event_id INTEGER NOT NULL
+                        REFERENCES events(id)
+                        ON DELETE CASCADE,
+
+                    hole_number INTEGER NOT NULL
+                        CHECK (hole_number BETWEEN 1 AND 18),
+
+                    par INTEGER NOT NULL
+                        CHECK (par BETWEEN 3 AND 6),
+
+                    stroke_index INTEGER NOT NULL
+                        CHECK (stroke_index BETWEEN 1 AND 18),
+
+                    UNIQUE(event_id, hole_number),
+
+                    UNIQUE(event_id, stroke_index)
                 );
             """)
 
@@ -99,15 +191,12 @@ def init_database():
                     player_id INTEGER NOT NULL
                         REFERENCES players(id),
 
-                    event_handicap NUMERIC(5,1) NOT NULL
-                        CHECK (
-                            event_handicap >= -10
-                            AND event_handicap <= 64
-                        ),
+                    event_handicap NUMERIC(5,1) NOT NULL,
 
                     group_number INTEGER,
 
-                    is_scorer BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_scorer BOOLEAN NOT NULL
+                        DEFAULT FALSE,
 
                     UNIQUE(event_id, player_id)
                 );
@@ -255,6 +344,7 @@ def test_connection():
     connection = get_connection()
 
     try:
+
         with connection.cursor(
             cursor_factory=RealDictCursor
         ) as cursor:
