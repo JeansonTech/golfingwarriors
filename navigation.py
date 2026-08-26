@@ -66,7 +66,7 @@ COURSES = st.Page(
 )
 
 EVENTS = st.Page(
-    "pages/events_admin.py",
+    "pages/events.py",
     title="Events",
     icon="🏆",
 )
