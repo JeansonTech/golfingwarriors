@@ -741,17 +741,12 @@ if status == "LIVE":
 
         try:
 
-            save_data = entered_scores.copy()
-
-            save_data[
-                "hole_number"
-            ] = selected_hole
-
-            save_hole_scores(
-                event_id,
-                scorer_id,
-                save_data
-            )
+save_hole_scores(
+    event_id,
+    scorer_id,
+    selected_hole,
+    entered_scores
+)
 
             st.success(
                 f"Hole {selected_hole} saved!"
