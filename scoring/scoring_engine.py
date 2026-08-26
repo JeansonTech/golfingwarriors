@@ -378,22 +378,14 @@ def rank_completed_players(
 
 def allocate_ranking_points(
     ranked_results,
-    ranking_points
+    ranking_points,
+    event_format
 ):
     """
     Allocate ranking points.
 
     Tied players share the average of the points
     for the positions they occupy.
-
-    Example:
-
-        2nd = 300
-        3rd = 150
-
-        If two players tie for 2nd:
-
-        (300 + 150) / 2 = 225 each
     """
 
     if not ranked_results:
@@ -407,10 +399,6 @@ def allocate_ranking_points(
 
         current = ranked_results[index]
 
-        # ----------------------------------------------------
-        # Determine tie group
-        # ----------------------------------------------------
-
         tie_group = [current]
 
         next_index = index + 1
@@ -419,16 +407,39 @@ def allocate_ranking_points(
 
             other = ranked_results[next_index]
 
-            if (
-                current["net_total"]
-                == other["net_total"]
-                and current["last_6_net"]
-                == other["last_6_net"]
-                and current["last_3_net"]
-                == other["last_3_net"]
-                and current["last_hole_net"]
-                == other["last_hole_net"]
-            ):
+            if event_format == "NET":
+
+                tied = (
+                    current["net_total"]
+                    == other["net_total"]
+                    and
+                    current["last_6_net"]
+                    == other["last_6_net"]
+                    and
+                    current["last_3_net"]
+                    == other["last_3_net"]
+                    and
+                    current["last_hole_net"]
+                    == other["last_hole_net"]
+                )
+
+            else:
+
+                tied = (
+                    current["ips_total"]
+                    == other["ips_total"]
+                    and
+                    current["last_6_ips"]
+                    == other["last_6_ips"]
+                    and
+                    current["last_3_ips"]
+                    == other["last_3_ips"]
+                    and
+                    current["last_hole_ips"]
+                    == other["last_hole_ips"]
+                )
+
+            if tied:
 
                 tie_group.append(other)
 
@@ -437,10 +448,6 @@ def allocate_ranking_points(
             else:
 
                 break
-
-        # ----------------------------------------------------
-        # Positions occupied by the tie
-        # ----------------------------------------------------
 
         first_position = index + 1
 
@@ -470,10 +477,6 @@ def allocate_ranking_points(
             if points
             else 0
         )
-
-        # ----------------------------------------------------
-        # Assign
-        # ----------------------------------------------------
 
         for player in tie_group:
 
