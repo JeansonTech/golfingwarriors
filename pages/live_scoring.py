@@ -18,114 +18,212 @@ from scoring.scoring_engine import (
 
 st.set_page_config(
     page_title="Golfing Warriors - Live Scoring",
-    page_icon="📱",
+    page_icon="🏌️",
     layout="wide"
 )
 
 
 # ============================================================
-# MOBILE / UI CSS
+# MOBILE-FIRST CSS
 # ============================================================
 
 st.markdown(
     """
     <style>
 
+    /* -------------------------------------------------------
+       GENERAL
+    ------------------------------------------------------- */
+
     .block-container {
-        padding-top: 1rem;
-        padding-bottom: 2rem;
+        padding-top: 0.7rem;
+        padding-bottom: 1.5rem;
+        max-width: 1100px;
     }
 
-    .score-card {
+
+    /* -------------------------------------------------------
+       COMPACT HOLE HEADER
+    ------------------------------------------------------- */
+
+    .hole-header {
+        text-align: center;
+        padding: 8px 0 4px 0;
+    }
+
+    .hole-title {
+        font-size: 2rem;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+
+    .hole-subtitle {
+        font-size: 0.9rem;
+        opacity: 0.7;
+        margin-top: 2px;
+    }
+
+
+    /* -------------------------------------------------------
+       PROGRESS
+    ------------------------------------------------------- */
+
+    .progress-title {
+        font-size: 0.95rem;
+        font-weight: 700;
+        margin-bottom: 2px;
+    }
+
+    .progress-count {
+        font-size: 0.82rem;
+        opacity: 0.65;
+        margin-bottom: 8px;
+    }
+
+    .hole-strip {
+        display: grid;
+        grid-template-columns: repeat(9, 1fr);
+        gap: 5px;
+        margin-bottom: 5px;
+    }
+
+    .hole-dot {
+        height: 31px;
+        min-width: 0;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.78rem;
+        font-weight: 700;
+        border: 1px solid rgba(128,128,128,0.30);
+        background: rgba(128,128,128,0.06);
+    }
+
+    .hole-dot.completed {
+        background: rgba(46, 204, 113, 0.18);
+        border-color: rgba(46, 204, 113, 0.55);
+    }
+
+    .hole-dot.current {
+        background: rgba(52, 152, 219, 0.22);
+        border: 2px solid #3498db;
+    }
+
+
+    /* -------------------------------------------------------
+       PLAYER CARD
+       ------------------------------------------------------- */
+
+    .player-card {
         border: 1px solid rgba(128,128,128,0.25);
-        border-radius: 14px;
-        padding: 12px 16px;
-        margin-bottom: 4px;
-        background: rgba(128,128,128,0.05);
+        border-radius: 12px;
+        padding: 9px 11px 4px 11px;
+        margin-bottom: 8px;
+        background: rgba(128,128,128,0.035);
     }
 
     .player-name {
-        font-size: 1.15rem;
-        font-weight: 700;
-    }
-
-    .score-display {
-        font-size: 2rem;
-        font-weight: 800;
-        text-align: center;
-        padding: 4px;
-    }
-
-    .hole-number {
-        font-size: 2.4rem;
-        font-weight: 800;
-        text-align: center;
-        margin-bottom: 0;
-    }
-
-    .hole-info {
-        text-align: center;
         font-size: 1rem;
-        opacity: 0.8;
-        margin-bottom: 12px;
+        font-weight: 750;
+        line-height: 1.1;
     }
 
-    .progress-title {
-        font-size: 1.1rem;
-        font-weight: 700;
-        margin-bottom: 4px;
+    .player-hcp {
+        font-size: 0.76rem;
+        opacity: 0.65;
+        margin-top: 2px;
     }
 
-    .progress-caption {
-        font-size: 0.9rem;
+    .player-stats {
+        font-size: 0.75rem;
         opacity: 0.75;
-        margin-bottom: 10px;
+        text-align: center;
+        padding-top: 5px;
     }
+
+
+    /* -------------------------------------------------------
+       SCORE
+       ------------------------------------------------------- */
+
+    div[data-testid="stNumberInput"] {
+        margin-bottom: 0 !important;
+    }
+
+    div[data-testid="stNumberInput"] label {
+        display: none;
+    }
+
+    div[data-testid="stNumberInput"] input {
+        text-align: center;
+        font-size: 1.35rem !important;
+        font-weight: 800;
+    }
+
+
+    /* -------------------------------------------------------
+       SAVE BUTTON
+       ------------------------------------------------------- */
 
     div.stButton > button {
-        min-height: 48px;
-        font-weight: 700;
+        min-height: 45px;
         border-radius: 10px;
+        font-weight: 700;
     }
 
     div.stButton > button[kind="primary"] {
-        min-height: 56px;
+        min-height: 55px;
         font-size: 1.05rem;
     }
 
-    [data-testid="stMetricValue"] {
-        font-size: 1.5rem;
-    }
+
+    /* -------------------------------------------------------
+       MOBILE
+       ------------------------------------------------------- */
 
     @media (max-width: 768px) {
 
         .block-container {
-            padding-left: 0.7rem;
-            padding-right: 0.7rem;
+            padding-left: 0.55rem;
+            padding-right: 0.55rem;
+            padding-top: 0.45rem;
         }
 
         h1 {
-            font-size: 1.7rem !important;
+            font-size: 1.55rem !important;
+            margin-bottom: 0.2rem !important;
         }
 
         h2 {
-            font-size: 1.45rem !important;
+            font-size: 1.3rem !important;
         }
 
         h3 {
-            font-size: 1.2rem !important;
+            font-size: 1.05rem !important;
         }
 
-        .hole-number {
-            font-size: 2.1rem;
+        .hole-title {
+            font-size: 1.8rem;
         }
 
-        .score-card {
-            padding: 10px 12px;
+        .hole-dot {
+            height: 29px;
+            font-size: 0.72rem;
+            border-radius: 7px;
         }
 
-        [data-testid="stMetricValue"] {
-            font-size: 1.3rem;
+        .player-card {
+            padding: 8px 9px 3px 9px;
+            margin-bottom: 6px;
+        }
+
+        .player-name {
+            font-size: 0.98rem;
+        }
+
+        .player-stats {
+            font-size: 0.7rem;
         }
 
     }
@@ -392,10 +490,6 @@ def finalize_event(
 
     try:
 
-        # ----------------------------------------------------
-        # CALCULATE ALL PLAYERS
-        # ----------------------------------------------------
-
         round_results = []
 
         for player in players:
@@ -415,24 +509,14 @@ def finalize_event(
                     f"completed all 18 holes."
                 )
 
-            round_results.append(
-                result
-            )
+            round_results.append(result)
 
-
-        # ----------------------------------------------------
-        # RANK PLAYERS
-        # ----------------------------------------------------
 
         ranked_results = rank_completed_players(
             round_results,
             event_format
         )
 
-
-        # ----------------------------------------------------
-        # GET CURRENT RANKING SETTINGS
-        # ----------------------------------------------------
 
         ranking_df = pd.read_sql_query(
             """
@@ -458,10 +542,6 @@ def finalize_event(
         }
 
 
-        # ----------------------------------------------------
-        # ALLOCATE RANKING POINTS
-        # ----------------------------------------------------
-
         final_results = allocate_ranking_points(
             ranked_results,
             ranking_points,
@@ -469,43 +549,25 @@ def finalize_event(
         )
 
 
-        # ----------------------------------------------------
-        # DATABASE TRANSACTION
-        # ----------------------------------------------------
-
         with connection.cursor() as cursor:
-
-            # ----------------------------------------------
-            # REMOVE EXISTING RESULTS
-            # ----------------------------------------------
 
             cursor.execute(
                 """
                 DELETE FROM event_results
-
                 WHERE event_id = %s
                 """,
                 (int(event_id),)
             )
 
-
-            # ----------------------------------------------
-            # REMOVE EXISTING RANKING POINTS
-            # ----------------------------------------------
 
             cursor.execute(
                 """
                 DELETE FROM ranking_points
-
                 WHERE event_id = %s
                 """,
                 (int(event_id),)
             )
 
-
-            # ----------------------------------------------
-            # SAVE RESULTS
-            # ----------------------------------------------
 
             for result in final_results:
 
@@ -556,67 +618,24 @@ def finalize_event(
 
                     VALUES
                         (
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s
+                            %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s
                         )
                     """,
                     (
                         int(event_id),
-
-                        int(
-                            result["player_id"]
-                        ),
-
-                        int(
-                            result["gross_total"]
-                        ),
-
-                        int(
-                            result["net_total"]
-                        ),
-
-                        int(
-                            result["ips_total"]
-                        ),
-
-                        int(
-                            last_6_score
-                        ),
-
-                        int(
-                            last_3_score
-                        ),
-
-                        int(
-                            last_hole_score
-                        ),
-
-                        int(
-                            result[
-                                "final_position"
-                            ]
-                        ),
-
-                        float(
-                            result[
-                                "ranking_points"
-                            ]
-                        )
+                        int(result["player_id"]),
+                        int(result["gross_total"]),
+                        int(result["net_total"]),
+                        int(result["ips_total"]),
+                        int(last_6_score),
+                        int(last_3_score),
+                        int(last_hole_score),
+                        int(result["final_position"]),
+                        float(result["ranking_points"])
                     )
                 )
 
-
-                # ------------------------------------------
-                # SAVE RANKING POINTS
-                # ------------------------------------------
 
                 cursor.execute(
                     """
@@ -640,27 +659,12 @@ def finalize_event(
                     """,
                     (
                         int(event_id),
-
-                        int(
-                            result[
-                                "player_id"
-                            ]
-                        ),
-
-                        float(
-                            result[
-                                "ranking_points"
-                            ]
-                        ),
-
+                        int(result["player_id"]),
+                        float(result["ranking_points"]),
                         int(event_id)
                     )
                 )
 
-
-            # ----------------------------------------------
-            # CLOSE EVENT
-            # ----------------------------------------------
 
             cursor.execute(
                 """
@@ -700,14 +704,11 @@ def finalize_event(
 # PAGE HEADER
 # ============================================================
 
-st.title(
-    "📱 Live Scoring"
-)
+st.title("🏌️ Live Scoring")
 
 st.caption(
     "One scorer per fourball • "
-    "Enter gross scores • "
-    "Net and IPS calculated automatically"
+    "Gross scores • Net and IPS calculated automatically"
 )
 
 
@@ -738,9 +739,7 @@ for _, row in events.iterrows():
         f"{row['format']}"
     )
 
-    event_options[
-        label
-    ] = int(row["id"])
+    event_options[label] = int(row["id"])
 
 
 selected_event_label = st.selectbox(
@@ -754,9 +753,7 @@ event_id = event_options[
 ]
 
 
-event_df = get_event(
-    event_id
-)
+event_df = get_event(event_id)
 
 
 if event_df.empty:
@@ -771,12 +768,11 @@ if event_df.empty:
 event = event_df.iloc[0]
 
 event_format = event["format"]
-
 status = event["status"]
 
 
 # ============================================================
-# EVENT SUMMARY
+# EVENT HEADER
 # ============================================================
 
 if status == "LIVE":
@@ -817,20 +813,14 @@ with event_col3:
 
 
 # ============================================================
-# LOAD EVENT DATA
+# LOAD DATA
 # ============================================================
 
-players_df = get_event_players(
-    event_id
-)
+players_df = get_event_players(event_id)
 
-holes_df = get_event_holes(
-    event_id
-)
+holes_df = get_event_holes(event_id)
 
-scores_df = get_scores(
-    event_id
-)
+scores_df = get_scores(event_id)
 
 
 if players_df.empty:
@@ -863,9 +853,7 @@ for _, player in players_df.iterrows():
     players.append(
         {
             "player_id":
-                int(
-                    player["player_id"]
-                ),
+                int(player["player_id"]),
 
             "name":
                 player["name"],
@@ -873,26 +861,18 @@ for _, player in players_df.iterrows():
             "nickname":
                 (
                     player["nickname"]
-                    if pd.notna(
-                        player["nickname"]
-                    )
+                    if pd.notna(player["nickname"])
                     else ""
                 ),
 
             "event_handicap":
-                float(
-                    player["event_handicap"]
-                ),
+                float(player["event_handicap"]),
 
             "group_number":
-                int(
-                    player["group_number"]
-                ),
+                int(player["group_number"]),
 
             "is_scorer":
-                bool(
-                    player["is_scorer"]
-                )
+                bool(player["is_scorer"])
         }
     )
 
@@ -906,34 +886,19 @@ score_lookup = {}
 
 for _, row in scores_df.iterrows():
 
-    player_id = int(
-        row["player_id"]
-    )
-
-    hole_number = int(
-        row["hole_number"]
-    )
-
     score_lookup[
         (
-            player_id,
-            hole_number
+            int(row["player_id"]),
+            int(row["hole_number"])
         )
-    ] = int(
-        row["gross_score"]
-    )
+    ] = int(row["gross_score"])
 
 
 # ============================================================
-# SELECT SCORER
+# SCORER SELECTION
 # ============================================================
 
 st.divider()
-
-st.subheader(
-    "📝 Scorer"
-)
-
 
 scorers = [
     player
@@ -958,20 +923,15 @@ for player in scorers:
 
     label = (
         f"{player['name']} "
-        f"— Fourball "
-        f"{player['group_number']}"
+        f"— Fourball {player['group_number']}"
     )
 
-    scorer_options[
-        label
-    ] = player
+    scorer_options[label] = player
 
 
 selected_scorer_label = st.selectbox(
-    "Who is scoring this fourball?",
-    list(
-        scorer_options.keys()
-    )
+    "📝 Scoring fourball",
+    list(scorer_options.keys())
 )
 
 
@@ -980,28 +940,23 @@ selected_scorer = scorer_options[
 ]
 
 
-scorer_id = selected_scorer[
-    "player_id"
-]
+scorer_id = selected_scorer["player_id"]
 
-group_number = selected_scorer[
-    "group_number"
-]
+group_number = selected_scorer["group_number"]
 
 
 # ============================================================
-# GET GROUP
+# GROUP
 # ============================================================
 
 group_players = [
     player
     for player in players
-    if player["group_number"]
-    == group_number
+    if player["group_number"] == group_number
 ]
 
 
-st.success(
+st.caption(
     f"👥 Fourball {group_number} • "
     f"Scorer: **{selected_scorer['name']}**"
 )
@@ -1018,14 +973,8 @@ current_hole_key = (
 )
 
 
-hole_options = list(
-    range(1, 19)
-)
+hole_options = list(range(1, 19))
 
-
-# ------------------------------------------------------------
-# Determine initial hole
-# ------------------------------------------------------------
 
 if current_hole_key not in st.session_state:
 
@@ -1050,6 +999,7 @@ if current_hole_key not in st.session_state:
             first_incomplete = test_hole
             break
 
+
     st.session_state[
         current_hole_key
     ] = first_incomplete
@@ -1061,13 +1011,12 @@ current_hole = st.session_state[
 
 
 # ============================================================
-# 18-HOLE PROGRESS INDICATOR
+# PROGRESS
 # ============================================================
 
 st.divider()
 
 completed_holes = 0
-
 
 hole_completed = {}
 
@@ -1086,9 +1035,11 @@ for test_hole in hole_options:
             complete = False
             break
 
+
     hole_completed[
         test_hole
     ] = complete
+
 
     if complete:
 
@@ -1104,97 +1055,71 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.caption(
-    f"{completed_holes} / 18 holes completed"
-)
-
-
-# ------------------------------------------------------------
-# Progress hole buttons
-# ------------------------------------------------------------
-
-for row_start in range(1, 19, 6):
-
-    progress_cols = st.columns(6)
-
-    for offset in range(6):
-
-        hole_number = row_start + offset
-
-        if hole_number > 18:
-
-            continue
-
-        with progress_cols[offset]:
-
-            if (
-                hole_number
-                == current_hole
-            ):
-
-                button_text = (
-                    f"🔵 {hole_number}"
-                )
-
-            elif hole_completed[
-                hole_number
-            ]:
-
-                button_text = (
-                    f"✅ {hole_number}"
-                )
-
-            else:
-
-                button_text = (
-                    str(hole_number)
-                )
-
-
-            if st.button(
-                button_text,
-                key=(
-                    f"progress_hole_"
-                    f"{event_id}_"
-                    f"{group_number}_"
-                    f"{hole_number}"
-                ),
-                use_container_width=True
-            ):
-
-                st.session_state[
-                    current_hole_key
-                ] = hole_number
-
-                st.rerun()
-
-
-# ============================================================
-# HOLE SELECTOR
-# ============================================================
-
-st.divider()
-
 st.markdown(
     f"""
-    <div class="hole-number">
-        ⛳ HOLE {current_hole}
-    </div>
-
-    <div class="hole-info">
-        Hole {current_hole} of 18
+    <div class="progress-count">
+        {completed_holes} / 18 holes completed
     </div>
     """,
     unsafe_allow_html=True
 )
 
 
+# ------------------------------------------------------------
+# Compact visual progress strip
+# ------------------------------------------------------------
+
+progress_html = '<div class="hole-strip">'
+
+
+for hole_number in range(1, 19):
+
+    if hole_number == current_hole:
+
+        css_class = "hole-dot current"
+        symbol = "●"
+
+    elif hole_completed[hole_number]:
+
+        css_class = "hole-dot completed"
+        symbol = "✓"
+
+    else:
+
+        css_class = "hole-dot"
+        symbol = str(hole_number)
+
+
+    progress_html += (
+        f'<div class="{css_class}">'
+        f'{symbol}'
+        f'</div>'
+    )
+
+
+progress_html += "</div>"
+
+
+st.markdown(
+    progress_html,
+    unsafe_allow_html=True
+)
+
+
+# ------------------------------------------------------------
+# Compact jump selector
+# ------------------------------------------------------------
+
 selected_hole = st.selectbox(
     "Jump to hole",
     hole_options,
     index=current_hole - 1,
     format_func=lambda hole:
-        f"Hole {hole}"
+        (
+            f"✓ Hole {hole}"
+            if hole_completed[hole]
+            else f"Hole {hole}"
+        )
 )
 
 
@@ -1204,47 +1129,42 @@ if selected_hole != current_hole:
         current_hole_key
     ] = selected_hole
 
-    current_hole = selected_hole
-
     st.rerun()
 
 
 # ============================================================
-# CURRENT HOLE INFORMATION
+# HOLE INFORMATION
 # ============================================================
 
 hole = holes_df[
-    holes_df["hole_number"]
-    == current_hole
+    holes_df["hole_number"] == current_hole
 ].iloc[0]
 
 
-par = int(
-    hole["par"]
-)
+par = int(hole["par"])
 
 stroke_index = int(
     hole["stroke_index"]
 )
 
 
-hole_info_col1, hole_info_col2 = st.columns(2)
+st.markdown(
+    f"""
+    <div class="hole-header">
 
+        <div class="hole-title">
+            ⛳ HOLE {current_hole}
+        </div>
 
-with hole_info_col1:
+        <div class="hole-subtitle">
+            PAR {par} &nbsp;•&nbsp;
+            STROKE INDEX {stroke_index}
+        </div>
 
-    st.metric(
-        "PAR",
-        par
-    )
-
-
-with hole_info_col2:
-
-    st.metric(
-        "STROKE INDEX",
-        stroke_index
-    )
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # ============================================================
@@ -1253,12 +1173,10 @@ with hole_info_col2:
 
 st.divider()
 
-st.subheader(
-    "🏌️ Enter Scores"
-)
+st.subheader("🏌️ Scores")
 
 st.caption(
-    "Use − / + to adjust each player's gross score."
+    "Adjust each player's gross score."
 )
 
 
@@ -1267,9 +1185,8 @@ entered_scores = {}
 
 for player in group_players:
 
-    player_id = player[
-        "player_id"
-    ]
+    player_id = player["player_id"]
+
 
     score_key = (
         f"mobile_score_"
@@ -1281,7 +1198,7 @@ for player in group_players:
 
 
     # --------------------------------------------------------
-    # Initial score
+    # Existing score
     # --------------------------------------------------------
 
     if score_key not in st.session_state:
@@ -1293,6 +1210,7 @@ for player in group_players:
             )
         )
 
+
         if existing_score is None:
 
             existing_score = par
@@ -1300,117 +1218,15 @@ for player in group_players:
 
         st.session_state[
             score_key
-        ] = int(
-            existing_score
-        )
+        ] = int(existing_score)
 
 
     # --------------------------------------------------------
-    # PLAYER NAME
+    # Calculate preview
     # --------------------------------------------------------
 
-    st.markdown(
-        f"""
-        <div class="score-card">
-            <div class="player-name">
-                {player['name']}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.caption(
-        f"HCP {player['event_handicap']:g}"
-    )
-
-
-    # --------------------------------------------------------
-    # SCORE CONTROLS
-    # --------------------------------------------------------
-
-    score_col1, score_col2, score_col3 = st.columns(
-        [1, 2, 1]
-    )
-
-
-    with score_col1:
-
-        if st.button(
-            "➖",
-            key=f"minus_{score_key}",
-            use_container_width=True
-        ):
-
-            st.session_state[
-                score_key
-            ] = max(
-                1,
-                st.session_state[
-                    score_key
-                ] - 1
-            )
-
-            st.rerun()
-
-
-    with score_col2:
-
-        st.markdown(
-            f"""
-            <div class="score-display">
-                {st.session_state[score_key]}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-
-    with score_col3:
-
-        if st.button(
-            "➕",
-            key=f"plus_{score_key}",
-            use_container_width=True
-        ):
-
-            st.session_state[
-                score_key
-            ] = min(
-                20,
-                st.session_state[
-                    score_key
-                ] + 1
-            )
-
-            st.rerun()
-
-
-    entered_scores[
-        player_id
-    ] = st.session_state[
+    gross = st.session_state[
         score_key
-    ]
-
-
-# ============================================================
-# HOLE PREVIEW
-# ============================================================
-
-st.divider()
-
-st.subheader(
-    "📊 Hole Results"
-)
-
-
-preview_rows = []
-
-
-for player in group_players:
-
-    gross = entered_scores[
-        player["player_id"]
     ]
 
 
@@ -1429,36 +1245,86 @@ for player in group_players:
     )
 
 
-    preview_rows.append(
-        {
-            "Player":
-                player["name"],
+    # --------------------------------------------------------
+    # PLAYER CARD
+    # --------------------------------------------------------
 
-            "HCP":
-                player["event_handicap"],
+    st.markdown(
+        f"""
+        <div class="player-card">
 
-            "Gross":
-                gross,
+            <div class="player-name">
+                {player['name']}
+            </div>
 
-            "Net":
-                net,
+            <div class="player-hcp">
+                HCP {player['event_handicap']:g}
+            </div>
 
-            "IPS":
-                ips
-        }
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
 
-preview_df = pd.DataFrame(
-    preview_rows
-)
+    # --------------------------------------------------------
+    # SCORE CONTROL
+    # --------------------------------------------------------
+
+    score_value = st.number_input(
+        "Score",
+        min_value=1,
+        max_value=20,
+        value=int(
+            st.session_state[
+                score_key
+            ]
+        ),
+        step=1,
+        key=score_key
+    )
 
 
-st.dataframe(
-    preview_df,
-    use_container_width=True,
-    hide_index=True
-)
+    entered_scores[
+        player_id
+    ] = int(score_value)
+
+
+    # --------------------------------------------------------
+    # Recalculate after input
+    # --------------------------------------------------------
+
+    net = calculate_net_score(
+        int(score_value),
+        player["event_handicap"],
+        stroke_index
+    )
+
+
+    ips = calculate_ips_points(
+        int(score_value),
+        par,
+        player["event_handicap"],
+        stroke_index
+    )
+
+
+    # --------------------------------------------------------
+    # Compact stats
+    # --------------------------------------------------------
+
+    st.markdown(
+        f"""
+        <div class="player-stats">
+            Gross <b>{int(score_value)}</b>
+            &nbsp; • &nbsp;
+            Net <b>{net}</b>
+            &nbsp; • &nbsp;
+            IPS <b>{ips}</b>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 # ============================================================
@@ -1478,6 +1344,7 @@ if status == "LIVE":
 
         hole_being_saved = current_hole
 
+
         try:
 
             save_hole_scores(
@@ -1489,7 +1356,7 @@ if status == "LIVE":
 
 
             # ------------------------------------------------
-            # Clear temporary score state for saved hole
+            # Clear temporary score state
             # ------------------------------------------------
 
             for player in group_players:
@@ -1501,6 +1368,7 @@ if status == "LIVE":
                     f"{hole_being_saved}_"
                     f"{player['player_id']}"
                 )
+
 
                 if score_key in st.session_state:
 
@@ -1517,9 +1385,7 @@ if status == "LIVE":
 
                 st.session_state[
                     current_hole_key
-                ] = (
-                    hole_being_saved + 1
-                )
+                ] = hole_being_saved + 1
 
             else:
 
@@ -1527,10 +1393,6 @@ if status == "LIVE":
                     current_hole_key
                 ] = 18
 
-
-            st.success(
-                f"✅ Hole {hole_being_saved} saved!"
-            )
 
             st.rerun()
 
@@ -1542,6 +1404,7 @@ if status == "LIVE":
             )
 
             st.exception(error)
+
 
 else:
 
@@ -1559,13 +1422,9 @@ score_dicts = {}
 
 for player in players:
 
-    player_id = player[
-        "player_id"
-    ]
+    player_id = player["player_id"]
 
-    score_dicts[
-        player_id
-    ] = {}
+    score_dicts[player_id] = {}
 
 
     for hole_number in hole_options:
@@ -1596,28 +1455,23 @@ for player in players:
 
     result = calculate_player_round(
         player,
-        holes_df.to_dict(
-            "records"
-        ),
+        holes_df.to_dict("records"),
         score_dicts[
             player["player_id"]
         ]
     )
 
-    round_results.append(
-        result
-    )
+
+    round_results.append(result)
 
 
 # ============================================================
-# PROGRESS
+# COMPACT FOURBALL PROGRESS
 # ============================================================
 
 st.divider()
 
-st.subheader(
-    "📈 Fourball Progress"
-)
+st.subheader("📈 Fourball")
 
 
 progress_rows = []
@@ -1666,7 +1520,7 @@ st.dataframe(
 
 
 # ============================================================
-# HOLE NAVIGATION
+# NAVIGATION
 # ============================================================
 
 st.divider()
@@ -1679,7 +1533,7 @@ with previous_col:
     if current_hole > 1:
 
         if st.button(
-            "⬅️ Previous Hole",
+            "⬅️ PREVIOUS",
             use_container_width=True
         ):
 
@@ -1695,7 +1549,7 @@ with next_col:
     if current_hole < 18:
 
         if st.button(
-            "Next Hole ➡️",
+            "NEXT ➡️",
             use_container_width=True
         ):
 
@@ -1729,6 +1583,7 @@ if event_format == "IPS":
     )
 
     score_column = "IPS"
+
 
 else:
 
@@ -1789,7 +1644,7 @@ st.dataframe(
 
 
 # ============================================================
-# ROUND STATUS
+# FINALIZE EVENT
 # ============================================================
 
 st.divider()
@@ -1829,9 +1684,7 @@ if all_complete:
                     event_id,
                     event_format,
                     players,
-                    holes_df.to_dict(
-                        "records"
-                    ),
+                    holes_df.to_dict("records"),
                     score_dicts
                 )
 
@@ -1856,34 +1709,22 @@ if all_complete:
                     result_rows.append(
                         {
                             "Position":
-                                result[
-                                    "final_position"
-                                ],
+                                result["final_position"],
 
                             "Player":
-                                result[
-                                    "name"
-                                ],
+                                result["name"],
 
                             "Gross":
-                                result[
-                                    "gross_total"
-                                ],
+                                result["gross_total"],
 
                             "Net":
-                                result[
-                                    "net_total"
-                                ],
+                                result["net_total"],
 
                             "IPS":
-                                result[
-                                    "ips_total"
-                                ],
+                                result["ips_total"],
 
                             "Ranking Points":
-                                result[
-                                    "ranking_points"
-                                ]
+                                result["ranking_points"]
                         }
                     )
 
@@ -1944,14 +1785,9 @@ else:
     )
 
 
-    st.write(
-        "Incomplete players:"
-    )
-
-
     for name, completed in incomplete:
 
         st.write(
-            f"- {name}: "
+            f"• {name}: "
             f"{completed}/18 holes"
         )
