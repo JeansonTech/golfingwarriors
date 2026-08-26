@@ -5,7 +5,8 @@ from database import get_connection
 
 from scoring.scoring_engine import (
     calculate_player_round,
-    rank_completed_players
+    calculate_net_score,
+    calculate_ips_points
 )
 
 
@@ -241,34 +242,6 @@ def save_hole_scores(
         connection.close()
 
 
-def get_ranking_points():
-
-    connection = get_connection()
-
-    try:
-
-        result = pd.read_sql_query(
-            """
-            SELECT
-                position,
-                points
-            FROM ranking_settings
-            WHERE active = TRUE
-            """,
-            connection
-        )
-
-        return {
-            int(row["position"]):
-                float(row["points"])
-            for _, row in result.iterrows()
-        }
-
-    finally:
-
-        connection.close()
-
-
 def set_pending_close(event_id):
 
     connection = get_connection()
@@ -372,6 +345,7 @@ else:
         f"🏁 {event['name']} — PENDING CLOSE"
     )
 
+
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -394,7 +368,7 @@ with col3:
 
 
 # ============================================================
-# DATA
+# LOAD EVENT DATA
 # ============================================================
 
 players_df = get_event_players(
@@ -408,6 +382,15 @@ holes_df = get_event_holes(
 scores_df = get_scores(
     event_id
 )
+
+
+if players_df.empty:
+
+    st.error(
+        "This event has no players assigned."
+    )
+
+    st.stop()
 
 
 if len(holes_df) != 18:
@@ -583,7 +566,9 @@ hole = holes_df[
 ].iloc[0]
 
 
-par = int(hole["par"])
+par = int(
+    hole["par"]
+)
 
 stroke_index = int(
     hole["stroke_index"]
@@ -678,11 +663,6 @@ st.subheader(
 
 preview_rows = []
 
-from scoring.scoring_engine import (
-    calculate_net_score,
-    calculate_ips_points
-)
-
 
 for player in group_players:
 
@@ -741,18 +721,20 @@ if status == "LIVE":
 
         try:
 
-save_hole_scores(
-    event_id,
-    scorer_id,
-    selected_hole,
-    entered_scores
-)
+            save_hole_scores(
+                event_id,
+                scorer_id,
+                selected_hole,
+                entered_scores
+            )
 
             st.success(
                 f"Hole {selected_hole} saved!"
             )
 
+            # -----------------------------------------------
             # Move to next hole
+            # -----------------------------------------------
 
             if selected_hole < 18:
 
@@ -787,9 +769,10 @@ st.divider()
 
 st.header("🏆 Live Leaderboard")
 
-# ------------------------------------------------------------
-# Build score dictionaries
-# ------------------------------------------------------------
+
+# ============================================================
+# BUILD SCORE DICTIONARIES
+# ============================================================
 
 score_dicts = {}
 
@@ -815,9 +798,9 @@ for player in players:
             ][hole_number] = score
 
 
-# ------------------------------------------------------------
-# Calculate players
-# ------------------------------------------------------------
+# ============================================================
+# CALCULATE PLAYER ROUNDS
+# ============================================================
 
 round_results = []
 
@@ -833,12 +816,14 @@ for player in players:
         ]
     )
 
-    round_results.append(result)
+    round_results.append(
+        result
+    )
 
 
-# ------------------------------------------------------------
-# Display leaderboard
-# ------------------------------------------------------------
+# ============================================================
+# DISPLAY LEADERBOARD
+# ============================================================
 
 if event_format == "IPS":
 
@@ -851,6 +836,8 @@ if event_format == "IPS":
         )
     )
 
+    score_column = "IPS"
+
 else:
 
     sorted_results = sorted(
@@ -862,6 +849,8 @@ else:
         )
     )
 
+    score_column = "Net"
+
 
 leaderboard_rows = []
 
@@ -869,18 +858,6 @@ for position, result in enumerate(
     sorted_results,
     start=1
 ):
-
-    if event_format == "IPS":
-
-        main_score = result[
-            "ips_total"
-        ]
-
-    else:
-
-        main_score = result[
-            "net_total"
-        ]
 
     leaderboard_rows.append(
         {
@@ -890,12 +867,12 @@ for position, result in enumerate(
             "Holes": (
                 f"{result['completed']}/18"
             ),
-            (
-                "IPS"
-                if event_format == "IPS"
-                else "Net"
-            ):
-                main_score
+            score_column:
+                (
+                    result["ips_total"]
+                    if event_format == "IPS"
+                    else result["net_total"]
+                )
         }
     )
 
@@ -937,16 +914,26 @@ if all_complete:
             use_container_width=True
         ):
 
-            set_pending_close(
-                event_id
-            )
+            try:
 
-            st.success(
-                "Scoring has been locked. "
-                "The event is now pending close."
-            )
+                set_pending_close(
+                    event_id
+                )
 
-            st.rerun()
+                st.success(
+                    "Scoring has been locked. "
+                    "The event is now pending close."
+                )
+
+                st.rerun()
+
+            except Exception as error:
+
+                st.error(
+                    "Unable to lock the round."
+                )
+
+                st.exception(error)
 
 else:
 
