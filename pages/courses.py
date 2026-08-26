@@ -11,6 +11,10 @@ st.set_page_config(
 )
 
 
+# ============================================================
+# DATABASE FUNCTIONS
+# ============================================================
+
 def get_courses():
 
     connection = get_connection()
@@ -35,11 +39,32 @@ def get_courses():
         connection.close()
 
 
-def create_course(
-    name,
-    location,
-    holes
-):
+def get_course_holes(course_id):
+
+    connection = get_connection()
+
+    try:
+
+        return pd.read_sql_query(
+            """
+            SELECT
+                hole_number,
+                par,
+                stroke_index
+            FROM course_holes
+            WHERE course_id = %s
+            ORDER BY hole_number
+            """,
+            connection,
+            params=(int(course_id),)
+        )
+
+    finally:
+
+        connection.close()
+
+
+def create_course(name, location, holes):
 
     connection = get_connection()
 
@@ -47,7 +72,6 @@ def create_course(
 
         with connection.cursor() as cursor:
 
-            # Create course
             cursor.execute(
                 """
                 INSERT INTO courses
@@ -69,7 +93,6 @@ def create_course(
 
             course_id = cursor.fetchone()[0]
 
-            # Add 18 holes
             for hole in holes:
 
                 cursor.execute(
@@ -99,11 +122,77 @@ def create_course(
         connection.close()
 
 
+def update_course(
+    course_id,
+    name,
+    location,
+    holes
+):
+
+    connection = get_connection()
+
+    try:
+
+        with connection.cursor() as cursor:
+
+            # Update master course
+            cursor.execute(
+                """
+                UPDATE courses
+                SET
+                    name = %s,
+                    location = %s
+                WHERE id = %s
+                """,
+                (
+                    name.strip(),
+                    location.strip()
+                    if location
+                    else None,
+                    int(course_id)
+                )
+            )
+
+            # Update the master course holes.
+            #
+            # IMPORTANT:
+            # This does NOT update event_holes.
+            # Past events therefore remain unchanged.
+            for hole in holes:
+
+                cursor.execute(
+                    """
+                    UPDATE course_holes
+                    SET
+                        par = %s,
+                        stroke_index = %s
+                    WHERE
+                        course_id = %s
+                        AND hole_number = %s
+                    """,
+                    (
+                        int(hole["par"]),
+                        int(hole["stroke_index"]),
+                        int(course_id),
+                        int(hole["hole"])
+                    )
+                )
+
+        connection.commit()
+
+    finally:
+
+        connection.close()
+
+
+# ============================================================
+# PAGE
+# ============================================================
+
 st.title("⛳ Courses")
 
 st.caption(
-    "Manage the golf courses used by "
-    "Golfing Warriors."
+    "Manage the golf courses used by Golfing Warriors."
 )
 
 st.divider()
@@ -117,21 +206,21 @@ st.subheader("➕ Add Golf Course")
 
 course_name = st.text_input(
     "Course Name",
-    placeholder="e.g. Mokopane Golf Club"
+    placeholder="e.g. Mokopane Golf Club",
+    key="new_course_name"
 )
 
 course_location = st.text_input(
     "Location",
-    placeholder="Optional"
+    placeholder="Optional",
+    key="new_course_location"
 )
 
 st.write("### Hole Information")
 
 st.caption(
-    "Enter the par and stroke index for each hole. "
-    "Stroke Index must be unique from 1 to 18."
+    "Enter the par and stroke index for each hole."
 )
-
 
 holes = []
 
@@ -157,9 +246,7 @@ for hole_number in range(1, 19):
 
     with col1:
 
-        st.write(
-            f"**{hole_number}**"
-        )
+        st.write(f"**{hole_number}**")
 
     with col2:
 
@@ -169,7 +256,7 @@ for hole_number in range(1, 19):
             max_value=6,
             value=4,
             step=1,
-            key=f"course_par_{hole_number}",
+            key=f"new_par_{hole_number}",
             label_visibility="collapsed"
         )
 
@@ -181,7 +268,7 @@ for hole_number in range(1, 19):
             max_value=18,
             value=hole_number,
             step=1,
-            key=f"course_si_{hole_number}",
+            key=f"new_si_{hole_number}",
             label_visibility="collapsed"
         )
 
@@ -194,51 +281,29 @@ for hole_number in range(1, 19):
     )
 
 
-st.divider()
-
-
 # ============================================================
-# VALIDATION
+# VALIDATE NEW COURSE
 # ============================================================
 
-errors = []
-
-stroke_indexes = [
+new_stroke_indexes = [
     hole["stroke_index"]
     for hole in holes
 ]
 
-if len(set(stroke_indexes)) != 18:
+new_course_valid = (
+    sorted(new_stroke_indexes)
+    == list(range(1, 19))
+)
 
-    errors.append(
-        "Stroke Index values must contain every "
-        "number from 1 to 18 exactly once."
+
+if not new_course_valid:
+
+    st.error(
+        "Stroke Index must contain every number "
+        "from 1 to 18 exactly once."
     )
-
-if sorted(stroke_indexes) != list(
-    range(1, 19)
-):
-
-    errors.append(
-        "Stroke Index must be exactly 1 through 18."
-    )
-
-
-# ============================================================
-# CREATE
-# ============================================================
-
-if errors:
-
-    for error in errors:
-
-        st.error(error)
 
 else:
-
-    st.success(
-        "Course hole information is valid."
-    )
 
     if st.button(
         "⛳ Save Golf Course",
@@ -276,14 +341,13 @@ else:
                 st.exception(error)
 
 
-st.divider()
-
-
 # ============================================================
 # EXISTING COURSES
 # ============================================================
 
-st.subheader("Existing Courses")
+st.divider()
+
+st.subheader("⛳ Existing Courses")
 
 courses = get_courses()
 
@@ -297,19 +361,185 @@ else:
 
     for _, course in courses.iterrows():
 
-        status = (
-            "🟢 Active"
-            if course["active"]
-            else "⚪ Inactive"
-        )
-
         location = (
             course["location"]
             if pd.notna(course["location"])
             else ""
         )
 
-        st.write(
-            f"**{course['name']}**"
-            f" — {location} — {status}"
+        status = (
+            "🟢 Active"
+            if course["active"]
+            else "⚪ Inactive"
         )
+
+        st.markdown(
+            f"### {course['name']}"
+        )
+
+        st.write(
+            f"{location} — {status}"
+        )
+
+        # ----------------------------------------------------
+        # COURSE HOLE INFORMATION
+        # ----------------------------------------------------
+
+        course_holes = get_course_holes(
+            course["id"]
+        )
+
+        with st.expander(
+            "View current hole information"
+        ):
+
+            display = course_holes.copy()
+
+            display.columns = [
+                "Hole",
+                "Par",
+                "Stroke Index"
+            ]
+
+            st.dataframe(
+                display,
+                use_container_width=True,
+                hide_index=True
+            )
+
+        # ----------------------------------------------------
+        # EDIT COURSE
+        # ----------------------------------------------------
+
+        with st.expander(
+            "✏️ Edit Course"
+        ):
+
+            edit_name = st.text_input(
+                "Course Name",
+                value=course["name"],
+                key=f"edit_name_{course['id']}"
+            )
+
+            edit_location = st.text_input(
+                "Location",
+                value=(
+                    course["location"]
+                    if pd.notna(course["location"])
+                    else ""
+                ),
+                key=f"edit_location_{course['id']}"
+            )
+
+            st.write("#### Edit Holes")
+
+            edited_holes = []
+
+            for _, hole in course_holes.iterrows():
+
+                col1, col2, col3 = st.columns(
+                    [1, 1, 2]
+                )
+
+                with col1:
+
+                    st.write(
+                        f"**Hole {int(hole['hole_number'])}**"
+                    )
+
+                with col2:
+
+                    edit_par = st.number_input(
+                        "Par",
+                        min_value=3,
+                        max_value=6,
+                        value=int(hole["par"]),
+                        step=1,
+                        key=(
+                            f"edit_par_"
+                            f"{course['id']}_"
+                            f"{hole['hole_number']}"
+                        )
+                    )
+
+                with col3:
+
+                    edit_si = st.number_input(
+                        "Stroke Index",
+                        min_value=1,
+                        max_value=18,
+                        value=int(
+                            hole["stroke_index"]
+                        ),
+                        step=1,
+                        key=(
+                            f"edit_si_"
+                            f"{course['id']}_"
+                            f"{hole['hole_number']}"
+                        )
+                    )
+
+                edited_holes.append(
+                    {
+                        "hole": int(
+                            hole["hole_number"]
+                        ),
+                        "par": edit_par,
+                        "stroke_index": edit_si
+                    }
+                )
+
+            edited_si = [
+                hole["stroke_index"]
+                for hole in edited_holes
+            ]
+
+            if sorted(edited_si) != list(
+                range(1, 19)
+            ):
+
+                st.error(
+                    "Stroke Index must contain "
+                    "every number from 1 to 18 "
+                    "exactly once."
+                )
+
+            else:
+
+                st.warning(
+                    "⚠️ Editing this course will "
+                    "only affect future events. "
+                    "Past events retain their original "
+                    "course and Stroke Index information."
+                )
+
+                if st.button(
+                    "💾 Save Course Changes",
+                    key=f"save_course_{course['id']}",
+                    type="primary"
+                ):
+
+                    try:
+
+                        update_course(
+                            course["id"],
+                            edit_name,
+                            edit_location,
+                            edited_holes
+                        )
+
+                        st.success(
+                            "Course updated successfully."
+                        )
+
+                        st.rerun()
+
+                    except Exception as error:
+
+                        st.error(
+                            "Unable to update course."
+                        )
+
+                        st.exception(error)
+
+        st.divider()
