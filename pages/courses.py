@@ -121,7 +121,6 @@ def create_course(name, location, holes):
 
         connection.close()
 
-
 def update_course(
     course_id,
     name,
@@ -135,7 +134,10 @@ def update_course(
 
         with connection.cursor() as cursor:
 
-            # Update master course
+            # -------------------------------------------------
+            # UPDATE COURSE DETAILS
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 UPDATE courses
@@ -153,37 +155,84 @@ def update_course(
                 )
             )
 
-            # Update the master course holes.
+            # -------------------------------------------------
+            # VALIDATE STROKE INDEXES
+            # -------------------------------------------------
+
+            stroke_indexes = [
+                int(hole["stroke_index"])
+                for hole in holes
+            ]
+
+            if sorted(stroke_indexes) != list(
+                range(1, 19)
+            ):
+
+                raise ValueError(
+                    "Stroke Index must contain "
+                    "every number from 1 to 18 exactly once."
+                )
+
+            # -------------------------------------------------
+            # REPLACE COURSE HOLES
             #
-            # IMPORTANT:
-            # This does NOT update event_holes.
-            # Past events therefore remain unchanged.
+            # We delete and recreate the 18 master holes
+            # inside ONE database transaction.
+            #
+            # This allows Stroke Index values to be swapped
+            # without triggering the UNIQUE constraint.
+            # -------------------------------------------------
+
+            cursor.execute(
+                """
+                DELETE FROM course_holes
+                WHERE course_id = %s
+                """,
+                (int(course_id),)
+            )
+
+            # -------------------------------------------------
+            # INSERT UPDATED HOLES
+            # -------------------------------------------------
+
             for hole in holes:
 
                 cursor.execute(
                     """
-                    UPDATE course_holes
-                    SET
-                        par = %s,
-                        stroke_index = %s
-                    WHERE
-                        course_id = %s
-                        AND hole_number = %s
+                    INSERT INTO course_holes
+                        (
+                            course_id,
+                            hole_number,
+                            par,
+                            stroke_index
+                        )
+                    VALUES
+                        (%s, %s, %s, %s)
                     """,
                     (
-                        int(hole["par"]),
-                        int(hole["stroke_index"]),
                         int(course_id),
-                        int(hole["hole"])
+                        int(hole["hole"]),
+                        int(hole["par"]),
+                        int(hole["stroke_index"])
                     )
                 )
 
+        # -----------------------------------------------------
+        # COMMIT EVERYTHING TOGETHER
+        # -----------------------------------------------------
+
         connection.commit()
+
+    except Exception:
+
+        # If anything goes wrong, restore the original course.
+        connection.rollback()
+
+        raise
 
     finally:
 
         connection.close()
-
 
 # ============================================================
 # PAGE
