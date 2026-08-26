@@ -1240,21 +1240,8 @@ for player in group_players:
     # --------------------------------------------------------
 
     st.markdown(
-        f"""
-        <div class="player-card">
-
-            <div class="player-name">
-                {player['name']}
-            </div>
-
-            <div class="player-hcp">
-                HCP {player['event_handicap']:g}
-            </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    f"**{player['name']}**  •  HCP {player['event_handicap']:g}"
+)
 
 
     # --------------------------------------------------------
