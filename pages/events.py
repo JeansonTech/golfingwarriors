@@ -83,7 +83,7 @@ def create_event(
                 RETURNING id
                 """,
                 (
-                    season_id,
+                    int(season_id),
                     name.strip(),
                     event_date,
                     course.strip()
@@ -96,7 +96,7 @@ def create_event(
 
         connection.commit()
 
-        return event_id
+        return int(event_id)
 
     finally:
         connection.close()
@@ -129,11 +129,11 @@ def add_event_players(
                         (%s, %s, %s, %s, %s)
                     """,
                     (
-                        event_id,
-                        player["player_id"],
-                        player["handicap"],
-                        player["group_number"],
-                        player["is_scorer"]
+                        int(event_id),
+                        int(player["player_id"]),
+                        float(player["handicap"]),
+                        int(player["group_number"]),
+                        bool(player["is_scorer"])
                     )
                 )
 
