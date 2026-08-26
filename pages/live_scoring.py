@@ -31,41 +31,23 @@ st.markdown(
     """
     <style>
 
-    /* -------------------------------------------------------
-       GENERAL
-    ------------------------------------------------------- */
-
     .block-container {
         padding-top: 1rem;
         padding-bottom: 2rem;
     }
 
-
-    /* -------------------------------------------------------
-       MOBILE SCORE CARD
-    ------------------------------------------------------- */
-
     .score-card {
         border: 1px solid rgba(128,128,128,0.25);
         border-radius: 14px;
-        padding: 14px 16px;
-        margin-bottom: 10px;
+        padding: 12px 16px;
+        margin-bottom: 4px;
         background: rgba(128,128,128,0.05);
     }
-
 
     .player-name {
         font-size: 1.15rem;
         font-weight: 700;
-        margin-bottom: 4px;
     }
-
-
-    .player-info {
-        font-size: 0.85rem;
-        opacity: 0.75;
-    }
-
 
     .score-display {
         font-size: 2rem;
@@ -74,18 +56,12 @@ st.markdown(
         padding: 4px;
     }
 
-
-    /* -------------------------------------------------------
-       HOLE HEADER
-       ------------------------------------------------------- */
-
     .hole-number {
         font-size: 2.4rem;
         font-weight: 800;
         text-align: center;
         margin-bottom: 0;
     }
-
 
     .hole-info {
         text-align: center;
@@ -94,40 +70,20 @@ st.markdown(
         margin-bottom: 12px;
     }
 
-
-    /* -------------------------------------------------------
-       MOBILE BUTTONS
-       ------------------------------------------------------- */
-
     div.stButton > button {
         min-height: 48px;
         font-weight: 700;
         border-radius: 10px;
     }
 
-
-    /* -------------------------------------------------------
-       SAVE BUTTON
-       ------------------------------------------------------- */
-
     div.stButton > button[kind="primary"] {
         min-height: 56px;
         font-size: 1.05rem;
     }
 
-
-    /* -------------------------------------------------------
-       METRICS
-       ------------------------------------------------------- */
-
     [data-testid="stMetricValue"] {
         font-size: 1.5rem;
     }
-
-
-    /* -------------------------------------------------------
-       MOBILE
-       ------------------------------------------------------- */
 
     @media (max-width: 768px) {
 
@@ -153,7 +109,7 @@ st.markdown(
         }
 
         .score-card {
-            padding: 12px;
+            padding: 10px 12px;
         }
 
         [data-testid="stMetricValue"] {
@@ -187,6 +143,7 @@ def get_live_events():
                 e.format,
                 e.status,
                 c.name AS course_name
+
             FROM events e
 
             LEFT JOIN courses c
@@ -223,6 +180,7 @@ def get_event(event_id):
                 e.format,
                 e.status,
                 c.name AS course_name
+
             FROM events e
 
             LEFT JOIN courses c
@@ -254,6 +212,7 @@ def get_event_players(event_id):
                 ep.is_scorer,
                 p.name,
                 p.nickname
+
             FROM event_players ep
 
             INNER JOIN players p
@@ -286,14 +245,15 @@ def get_event_holes(event_id):
                 hole_number,
                 par,
                 stroke_index
+
             FROM event_holes
 
             WHERE event_id = %s
 
-            ORDER BY hole_number
+            ORDER BY
+                hole_number
             """,
-            connection,
-            params=(int(event_id),)
+            connection
         )
 
     finally:
@@ -396,7 +356,6 @@ def save_hole_scores(
     except Exception:
 
         connection.rollback()
-
         raise
 
     finally:
@@ -482,8 +441,7 @@ def finalize_event(
             int(row["position"]):
                 float(row["points"])
 
-            for _, row
-            in ranking_df.iterrows()
+            for _, row in ranking_df.iterrows()
         }
 
 
@@ -504,10 +462,6 @@ def finalize_event(
 
         with connection.cursor() as cursor:
 
-            # ----------------------------------------------
-            # REMOVE EXISTING RESULTS
-            # ----------------------------------------------
-
             cursor.execute(
                 """
                 DELETE FROM event_results
@@ -517,10 +471,6 @@ def finalize_event(
                 (int(event_id),)
             )
 
-
-            # ----------------------------------------------
-            # REMOVE EXISTING RANKING POINTS
-            # ----------------------------------------------
 
             cursor.execute(
                 """
@@ -532,39 +482,39 @@ def finalize_event(
             )
 
 
-            # ----------------------------------------------
+            # ------------------------------------------------
             # SAVE RESULTS
-            # ----------------------------------------------
+            # ------------------------------------------------
 
             for result in final_results:
 
                 if event_format == "NET":
 
-                    last_6_score = (
-                        result["last_6_net"]
-                    )
+                    last_6_score = result[
+                        "last_6_net"
+                    ]
 
-                    last_3_score = (
-                        result["last_3_net"]
-                    )
+                    last_3_score = result[
+                        "last_3_net"
+                    ]
 
-                    last_hole_score = (
-                        result["last_hole_net"]
-                    )
+                    last_hole_score = result[
+                        "last_hole_net"
+                    ]
 
                 else:
 
-                    last_6_score = (
-                        result["last_6_ips"]
-                    )
+                    last_6_score = result[
+                        "last_6_ips"
+                    ]
 
-                    last_3_score = (
-                        result["last_3_ips"]
-                    )
+                    last_3_score = result[
+                        "last_3_ips"
+                    ]
 
-                    last_hole_score = (
-                        result["last_hole_ips"]
-                    )
+                    last_hole_score = result[
+                        "last_hole_ips"
+                    ]
 
 
                 cursor.execute(
@@ -643,9 +593,9 @@ def finalize_event(
                 )
 
 
-                # ------------------------------------------
+                # --------------------------------------------
                 # SAVE RANKING POINTS
-                # ------------------------------------------
+                # --------------------------------------------
 
                 cursor.execute(
                     """
@@ -687,9 +637,9 @@ def finalize_event(
                 )
 
 
-            # ----------------------------------------------
+            # ------------------------------------------------
             # CLOSE EVENT
-            # ----------------------------------------------
+            # ------------------------------------------------
 
             cursor.execute(
                 """
@@ -715,13 +665,10 @@ def finalize_event(
 
         return final_results
 
-
     except Exception:
 
         connection.rollback()
-
         raise
-
 
     finally:
 
@@ -777,9 +724,7 @@ for _, row in events.iterrows():
 
 selected_event_label = st.selectbox(
     "🏆 Event",
-    list(
-        event_options.keys()
-    )
+    list(event_options.keys())
 )
 
 
@@ -1045,21 +990,29 @@ st.success(
 # HOLE STATE
 # ============================================================
 
-hole_options = list(
-    range(1, 19)
-)
-
-
 current_hole_key = (
     f"current_hole_"
     f"{event_id}_"
     f"{group_number}"
 )
 
+hole_selector_key = (
+    f"hole_selector_"
+    f"{event_id}_"
+    f"{group_number}"
+)
+
+
+hole_options = list(
+    range(1, 19)
+)
+
+
+# ------------------------------------------------------------
+# Determine initial hole
+# ------------------------------------------------------------
 
 if current_hole_key not in st.session_state:
-
-    # Find the first hole that is not completely scored
 
     first_incomplete = 1
 
@@ -1075,18 +1028,29 @@ if current_hole_key not in st.session_state:
             ) not in score_lookup:
 
                 complete = False
-
                 break
 
         if not complete:
 
             first_incomplete = test_hole
-
             break
 
     st.session_state[
         current_hole_key
     ] = first_incomplete
+
+
+# ------------------------------------------------------------
+# Keep selector synchronized
+# ------------------------------------------------------------
+
+if hole_selector_key not in st.session_state:
+
+    st.session_state[
+        hole_selector_key
+    ] = st.session_state[
+        current_hole_key
+    ]
 
 
 current_hole = st.session_state[
@@ -1099,7 +1063,6 @@ current_hole = st.session_state[
 # ============================================================
 
 st.divider()
-
 
 st.markdown(
     f"""
@@ -1115,25 +1078,22 @@ st.markdown(
 )
 
 
-# ------------------------------------------------------------
-# Hole selector
-# ------------------------------------------------------------
-
 selected_hole = st.selectbox(
     "Jump to hole",
     hole_options,
-    index=current_hole - 1,
     format_func=lambda hole:
-        f"Hole {hole}"
+        f"Hole {hole}",
+    key=hole_selector_key
 )
 
-if selected_hole != current_hole:
 
-    current_hole = selected_hole
+if selected_hole != current_hole:
 
     st.session_state[
         current_hole_key
     ] = selected_hole
+
+    current_hole = selected_hole
 
 
 # ============================================================
@@ -1233,10 +1193,10 @@ for player in group_players:
 
 
     # --------------------------------------------------------
-    # Player card
+    # PLAYER NAME
     # --------------------------------------------------------
 
-       st.markdown(
+    st.markdown(
         f"""
         <div class="score-card">
             <div class="player-name">
@@ -1250,6 +1210,11 @@ for player in group_players:
     st.caption(
         f"HCP {player['event_handicap']:g}"
     )
+
+
+    # --------------------------------------------------------
+    # SCORE CONTROLS
+    # --------------------------------------------------------
 
     score_col1, score_col2, score_col3 = st.columns(
         [1, 2, 1]
@@ -1408,13 +1373,8 @@ if status == "LIVE":
             )
 
 
-            st.success(
-                f"✅ Hole {current_hole} saved!"
-            )
-
-
             # ------------------------------------------------
-            # Clear current hole's widget state
+            # Clear current hole's temporary score state
             # ------------------------------------------------
 
             for player in group_players:
@@ -1435,14 +1395,40 @@ if status == "LIVE":
 
 
             # ------------------------------------------------
-            # Move forward
+            # Move to next hole
             # ------------------------------------------------
 
             if current_hole < 18:
 
+                next_hole = (
+                    current_hole + 1
+                )
+
                 st.session_state[
                     current_hole_key
-                ] = current_hole + 1
+                ] = next_hole
+
+                # IMPORTANT:
+                # Keep selectbox synchronized
+
+                st.session_state[
+                    hole_selector_key
+                ] = next_hole
+
+            else:
+
+                st.session_state[
+                    current_hole_key
+                ] = 18
+
+                st.session_state[
+                    hole_selector_key
+                ] = 18
+
+
+            st.success(
+                f"✅ Hole {current_hole} saved!"
+            )
 
             st.rerun()
 
@@ -1516,7 +1502,6 @@ for player in players:
         ]
     )
 
-
     round_results.append(
         result
     )
@@ -1536,15 +1521,13 @@ st.subheader(
 progress_rows = []
 
 
+group_player_ids = [
+    player["player_id"]
+    for player in group_players
+]
+
+
 for result in round_results:
-
-    # Only players in this scorer's fourball
-
-    group_player_ids = [
-        player["player_id"]
-        for player in group_players
-    ]
-
 
     if result["player_id"] not in group_player_ids:
 
@@ -1598,9 +1581,17 @@ with previous_col:
             use_container_width=True
         ):
 
+            previous_hole = (
+                current_hole - 1
+            )
+
             st.session_state[
                 current_hole_key
-            ] = current_hole - 1
+            ] = previous_hole
+
+            st.session_state[
+                hole_selector_key
+            ] = previous_hole
 
             st.rerun()
 
@@ -1614,9 +1605,17 @@ with next_col:
             use_container_width=True
         ):
 
+            next_hole = (
+                current_hole + 1
+            )
+
             st.session_state[
                 current_hole_key
-            ] = current_hole + 1
+            ] = next_hole
+
+            st.session_state[
+                hole_selector_key
+            ] = next_hole
 
             st.rerun()
 
@@ -1754,7 +1753,6 @@ if all_complete:
                 st.success(
                     "🏆 Event finalized successfully!"
                 )
-
 
                 st.balloons()
 
