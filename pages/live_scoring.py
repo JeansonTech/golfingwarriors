@@ -12,10 +12,159 @@ from scoring.scoring_engine import (
 )
 
 
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+
 st.set_page_config(
     page_title="Golfing Warriors - Live Scoring",
     page_icon="📱",
     layout="wide"
+)
+
+
+# ============================================================
+# MOBILE / UI CSS
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
+    /* -------------------------------------------------------
+       GENERAL
+    ------------------------------------------------------- */
+
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+    }
+
+
+    /* -------------------------------------------------------
+       MOBILE SCORE CARD
+    ------------------------------------------------------- */
+
+    .score-card {
+        border: 1px solid rgba(128,128,128,0.25);
+        border-radius: 14px;
+        padding: 14px 16px;
+        margin-bottom: 10px;
+        background: rgba(128,128,128,0.05);
+    }
+
+
+    .player-name {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+
+
+    .player-info {
+        font-size: 0.85rem;
+        opacity: 0.75;
+    }
+
+
+    .score-display {
+        font-size: 2rem;
+        font-weight: 800;
+        text-align: center;
+        padding: 4px;
+    }
+
+
+    /* -------------------------------------------------------
+       HOLE HEADER
+       ------------------------------------------------------- */
+
+    .hole-number {
+        font-size: 2.4rem;
+        font-weight: 800;
+        text-align: center;
+        margin-bottom: 0;
+    }
+
+
+    .hole-info {
+        text-align: center;
+        font-size: 1rem;
+        opacity: 0.8;
+        margin-bottom: 12px;
+    }
+
+
+    /* -------------------------------------------------------
+       MOBILE BUTTONS
+       ------------------------------------------------------- */
+
+    div.stButton > button {
+        min-height: 48px;
+        font-weight: 700;
+        border-radius: 10px;
+    }
+
+
+    /* -------------------------------------------------------
+       SAVE BUTTON
+       ------------------------------------------------------- */
+
+    div.stButton > button[kind="primary"] {
+        min-height: 56px;
+        font-size: 1.05rem;
+    }
+
+
+    /* -------------------------------------------------------
+       METRICS
+       ------------------------------------------------------- */
+
+    [data-testid="stMetricValue"] {
+        font-size: 1.5rem;
+    }
+
+
+    /* -------------------------------------------------------
+       MOBILE
+       ------------------------------------------------------- */
+
+    @media (max-width: 768px) {
+
+        .block-container {
+            padding-left: 0.7rem;
+            padding-right: 0.7rem;
+        }
+
+        h1 {
+            font-size: 1.7rem !important;
+        }
+
+        h2 {
+            font-size: 1.45rem !important;
+        }
+
+        h3 {
+            font-size: 1.2rem !important;
+        }
+
+        .hole-number {
+            font-size: 2.1rem;
+        }
+
+        .score-card {
+            padding: 12px;
+        }
+
+        [data-testid="stMetricValue"] {
+            font-size: 1.3rem;
+        }
+
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -48,7 +197,8 @@ def get_live_events():
                 'PENDING_CLOSE'
             )
 
-            ORDER BY e.event_date DESC
+            ORDER BY
+                e.event_date DESC
             """,
             connection
         )
@@ -64,7 +214,7 @@ def get_event(event_id):
 
     try:
 
-        result = pd.read_sql_query(
+        return pd.read_sql_query(
             """
             SELECT
                 e.id,
@@ -83,8 +233,6 @@ def get_event(event_id):
             connection,
             params=(int(event_id),)
         )
-
-        return result
 
     finally:
 
@@ -139,7 +287,9 @@ def get_event_holes(event_id):
                 par,
                 stroke_index
             FROM event_holes
+
             WHERE event_id = %s
+
             ORDER BY hole_number
             """,
             connection,
@@ -163,8 +313,11 @@ def get_scores(event_id):
                 player_id,
                 hole_number,
                 gross_score
+
             FROM hole_scores
+
             WHERE event_id = %s
+
             ORDER BY
                 player_id,
                 hole_number
@@ -207,16 +360,19 @@ def save_hole_scores(
                             gross_score,
                             recorded_by_player_id
                         )
+
                     VALUES
                         (%s, %s, %s, %s, %s)
 
-                    ON CONFLICT (
-                        event_id,
-                        player_id,
-                        hole_number
-                    )
+                    ON CONFLICT
+                        (
+                            event_id,
+                            player_id,
+                            hole_number
+                        )
 
                     DO UPDATE SET
+
                         gross_score =
                             EXCLUDED.gross_score,
 
@@ -291,6 +447,7 @@ def finalize_event(
                 result
             )
 
+
         # ----------------------------------------------------
         # RANK PLAYERS
         # ----------------------------------------------------
@@ -300,8 +457,9 @@ def finalize_event(
             event_format
         )
 
+
         # ----------------------------------------------------
-        # GET RANKING POINT SETTINGS
+        # GET CURRENT RANKING SETTINGS
         # ----------------------------------------------------
 
         ranking_df = pd.read_sql_query(
@@ -309,18 +467,25 @@ def finalize_event(
             SELECT
                 position,
                 points
+
             FROM ranking_settings
+
             WHERE active = TRUE
+
             ORDER BY position
             """,
             connection
         )
 
+
         ranking_points = {
             int(row["position"]):
                 float(row["points"])
-            for _, row in ranking_df.iterrows()
+
+            for _, row
+            in ranking_df.iterrows()
         }
+
 
         # ----------------------------------------------------
         # ALLOCATE RANKING POINTS
@@ -332,6 +497,7 @@ def finalize_event(
             event_format
         )
 
+
         # ----------------------------------------------------
         # DATABASE TRANSACTION
         # ----------------------------------------------------
@@ -339,52 +505,67 @@ def finalize_event(
         with connection.cursor() as cursor:
 
             # ----------------------------------------------
-            # DELETE EXISTING RESULTS
+            # REMOVE EXISTING RESULTS
             # ----------------------------------------------
 
             cursor.execute(
                 """
                 DELETE FROM event_results
+
                 WHERE event_id = %s
                 """,
                 (int(event_id),)
             )
 
+
             # ----------------------------------------------
-            # DELETE EXISTING RANKING POINTS
+            # REMOVE EXISTING RANKING POINTS
             # ----------------------------------------------
 
             cursor.execute(
                 """
                 DELETE FROM ranking_points
+
                 WHERE event_id = %s
                 """,
                 (int(event_id),)
             )
 
+
             # ----------------------------------------------
-            # SAVE FINAL RESULTS
+            # SAVE RESULTS
             # ----------------------------------------------
 
             for result in final_results:
 
-                last_6_score = (
-                    result["last_6_net"]
-                    if event_format == "NET"
-                    else result["last_6_ips"]
-                )
+                if event_format == "NET":
 
-                last_3_score = (
-                    result["last_3_net"]
-                    if event_format == "NET"
-                    else result["last_3_ips"]
-                )
+                    last_6_score = (
+                        result["last_6_net"]
+                    )
 
-                last_hole_score = (
-                    result["last_hole_net"]
-                    if event_format == "NET"
-                    else result["last_hole_ips"]
-                )
+                    last_3_score = (
+                        result["last_3_net"]
+                    )
+
+                    last_hole_score = (
+                        result["last_hole_net"]
+                    )
+
+                else:
+
+                    last_6_score = (
+                        result["last_6_ips"]
+                    )
+
+                    last_3_score = (
+                        result["last_3_ips"]
+                    )
+
+                    last_hole_score = (
+                        result["last_hole_ips"]
+                    )
+
 
                 cursor.execute(
                     """
@@ -401,6 +582,7 @@ def finalize_event(
                             final_position,
                             ranking_points
                         )
+
                     VALUES
                         (
                             %s,
@@ -460,6 +642,7 @@ def finalize_event(
                     )
                 )
 
+
                 # ------------------------------------------
                 # SAVE RANKING POINTS
                 # ------------------------------------------
@@ -473,19 +656,24 @@ def finalize_event(
                             player_id,
                             points
                         )
+
                     SELECT
                         season_id,
                         %s,
                         %s,
                         %s
+
                     FROM events
+
                     WHERE id = %s
                     """,
                     (
                         int(event_id),
 
                         int(
-                            result["player_id"]
+                            result[
+                                "player_id"
+                            ]
                         ),
 
                         float(
@@ -498,6 +686,7 @@ def finalize_event(
                     )
                 )
 
+
             # ----------------------------------------------
             # CLOSE EVENT
             # ----------------------------------------------
@@ -505,10 +694,14 @@ def finalize_event(
             cursor.execute(
                 """
                 UPDATE events
+
                 SET
                     status = 'CLOSED',
-                    closed_at = CURRENT_TIMESTAMP
+                    closed_at =
+                        CURRENT_TIMESTAMP
+
                 WHERE id = %s
+
                 AND status IN (
                     'LIVE',
                     'PENDING_CLOSE'
@@ -517,9 +710,11 @@ def finalize_event(
                 (int(event_id),)
             )
 
+
         connection.commit()
 
         return final_results
+
 
     except Exception:
 
@@ -527,23 +722,25 @@ def finalize_event(
 
         raise
 
+
     finally:
 
         connection.close()
 
 
 # ============================================================
-# PAGE
+# PAGE HEADER
 # ============================================================
 
-st.title("📱 Live Scoring")
-
-st.caption(
-    "One scorer per fourball. Enter gross scores and "
-    "Golfing Warriors calculates Net and IPS automatically."
+st.title(
+    "📱 Live Scoring"
 )
 
-st.divider()
+st.caption(
+    "One scorer per fourball • "
+    "Enter gross scores • "
+    "Net and IPS calculated automatically"
+)
 
 
 # ============================================================
@@ -551,6 +748,7 @@ st.divider()
 # ============================================================
 
 events = get_live_events()
+
 
 if events.empty:
 
@@ -562,6 +760,7 @@ if events.empty:
 
 
 event_options = {}
+
 
 for _, row in events.iterrows():
 
@@ -577,9 +776,12 @@ for _, row in events.iterrows():
 
 
 selected_event_label = st.selectbox(
-    "Select Event",
-    list(event_options.keys())
+    "🏆 Event",
+    list(
+        event_options.keys()
+    )
 )
+
 
 event_id = event_options[
     selected_event_label
@@ -589,6 +791,7 @@ event_id = event_options[
 event_df = get_event(
     event_id
 )
+
 
 if event_df.empty:
 
@@ -607,7 +810,7 @@ status = event["status"]
 
 
 # ============================================================
-# EVENT HEADER
+# EVENT SUMMARY
 # ============================================================
 
 if status == "LIVE":
@@ -616,31 +819,34 @@ if status == "LIVE":
         f"🟢 {event['name']} — LIVE"
     )
 
-elif status == "PENDING_CLOSE":
+else:
 
     st.warning(
-        f"🏁 {event['name']} — PENDING CLOSE"
+        f"🔒 {event['name']} — PENDING CLOSE"
     )
 
 
-col1, col2, col3 = st.columns(3)
+event_col1, event_col2, event_col3 = st.columns(3)
 
-with col1:
+
+with event_col1:
 
     st.write(
-        f"📅 **Date:** {event['event_date']}"
+        f"📅 **{event['event_date']}**"
     )
 
-with col2:
+
+with event_col2:
 
     st.write(
-        f"⛳ **Course:** {event['course_name']}"
+        f"⛳ **{event['course_name']}**"
     )
 
-with col3:
+
+with event_col3:
 
     st.write(
-        f"🏆 **Format:** {event_format}"
+        f"🏆 **{event_format}**"
     )
 
 
@@ -685,12 +891,15 @@ if len(holes_df) != 18:
 
 players = []
 
+
 for _, player in players_df.iterrows():
 
     players.append(
         {
             "player_id":
-                int(player["player_id"]),
+                int(
+                    player["player_id"]
+                ),
 
             "name":
                 player["name"],
@@ -728,6 +937,7 @@ for _, player in players_df.iterrows():
 
 score_lookup = {}
 
+
 for _, row in scores_df.iterrows():
 
     player_id = int(
@@ -755,8 +965,9 @@ for _, row in scores_df.iterrows():
 st.divider()
 
 st.subheader(
-    "📝 Select Scorer"
+    "📝 Scorer"
 )
+
 
 scorers = [
     player
@@ -776,6 +987,7 @@ if not scorers:
 
 scorer_options = {}
 
+
 for player in scorers:
 
     label = (
@@ -790,15 +1002,17 @@ for player in scorers:
 
 
 selected_scorer_label = st.selectbox(
-    "Who is doing the scoring?",
+    "Who is scoring this fourball?",
     list(
         scorer_options.keys()
     )
 )
 
+
 selected_scorer = scorer_options[
     selected_scorer_label
 ]
+
 
 scorer_id = selected_scorer[
     "player_id"
@@ -822,20 +1036,14 @@ group_players = [
 
 
 st.success(
-    f"Scoring **Fourball {group_number}** "
-    f"for **{selected_scorer['name']}**"
+    f"👥 Fourball {group_number} • "
+    f"Scorer: **{selected_scorer['name']}**"
 )
 
 
 # ============================================================
-# HOLE SELECTOR
+# HOLE STATE
 # ============================================================
-
-st.divider()
-
-st.subheader(
-    "⛳ Hole"
-)
 
 hole_options = list(
     range(1, 19)
@@ -849,29 +1057,98 @@ current_hole_key = (
 )
 
 
-current_hole = st.session_state.get(
-    current_hole_key,
-    1
+if current_hole_key not in st.session_state:
+
+    # Find the first hole that is not completely scored
+
+    first_incomplete = 1
+
+    for test_hole in hole_options:
+
+        complete = True
+
+        for player in group_players:
+
+            if (
+                player["player_id"],
+                test_hole
+            ) not in score_lookup:
+
+                complete = False
+
+                break
+
+        if not complete:
+
+            first_incomplete = test_hole
+
+            break
+
+    st.session_state[
+        current_hole_key
+    ] = first_incomplete
+
+
+current_hole = st.session_state[
+    current_hole_key
+]
+
+
+# ============================================================
+# HOLE SELECTOR
+# ============================================================
+
+st.divider()
+
+
+st.markdown(
+    f"""
+    <div class="hole-number">
+        ⛳ HOLE {current_hole}
+    </div>
+
+    <div class="hole-info">
+        Hole {current_hole} of 18
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 
+# ------------------------------------------------------------
+# Hole selector
+# ------------------------------------------------------------
+
 selected_hole = st.selectbox(
-    "Select Hole",
+    "Jump to hole",
     hole_options,
     index=current_hole - 1,
     format_func=lambda hole:
-        f"Hole {hole}"
+        f"Hole {hole}",
+    key=(
+        f"hole_selector_"
+        f"{event_id}_"
+        f"{group_number}"
+    )
 )
 
 
-st.session_state[
-    current_hole_key
-] = selected_hole
+if selected_hole != current_hole:
 
+    current_hole = selected_hole
+
+    st.session_state[
+        current_hole_key
+    ] = selected_hole
+
+
+# ============================================================
+# CURRENT HOLE INFORMATION
+# ============================================================
 
 hole = holes_df[
     holes_df["hole_number"]
-    == selected_hole
+    == current_hole
 ].iloc[0]
 
 
@@ -884,24 +1161,21 @@ stroke_index = int(
 )
 
 
-st.markdown(
-    f"## Hole {selected_hole}"
-)
+hole_info_col1, hole_info_col2 = st.columns(2)
 
 
-hole_col1, hole_col2 = st.columns(2)
-
-with hole_col1:
+with hole_info_col1:
 
     st.metric(
-        "Par",
+        "PAR",
         par
     )
 
-with hole_col2:
+
+with hole_info_col2:
 
     st.metric(
-        "Stroke Index",
+        "STROKE INDEX",
         stroke_index
     )
 
@@ -913,12 +1187,11 @@ with hole_col2:
 st.divider()
 
 st.subheader(
-    "Enter Gross Scores"
+    "🏌️ Enter Scores"
 )
 
 st.caption(
-    "Enter the actual gross score for each player. "
-    "Net and IPS are calculated automatically."
+    "Use − / + to adjust each player's gross score."
 )
 
 
@@ -931,39 +1204,122 @@ for player in group_players:
         "player_id"
     ]
 
-    previous_score = score_lookup.get(
-        (
-            player_id,
-            selected_hole
-        )
+    score_key = (
+        f"mobile_score_"
+        f"{event_id}_"
+        f"{group_number}_"
+        f"{current_hole}_"
+        f"{player_id}"
     )
 
-    default_score = (
-        previous_score
-        if previous_score is not None
-        else par
+
+    # --------------------------------------------------------
+    # Initial score
+    # --------------------------------------------------------
+
+    if score_key not in st.session_state:
+
+        existing_score = score_lookup.get(
+            (
+                player_id,
+                current_hole
+            )
+        )
+
+        if existing_score is None:
+
+            existing_score = par
+
+
+        st.session_state[
+            score_key
+        ] = int(
+            existing_score
+        )
+
+
+    # --------------------------------------------------------
+    # Player card
+    # --------------------------------------------------------
+
+    st.markdown(
+        f"""
+        <div class="score-card">
+            <div class="player-name">
+                {player['name']}
+            </div>
+
+            <div class="player-info">
+                HCP {player['event_handicap']:g}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    score = st.number_input(
-        player["name"],
-        min_value=1,
-        max_value=20,
-        value=int(
-            default_score
-        ),
-        step=1,
-        key=(
-            f"score_"
-            f"{event_id}_"
-            f"{group_number}_"
-            f"{selected_hole}_"
-            f"{player_id}"
-        )
+
+    score_col1, score_col2, score_col3 = st.columns(
+        [1, 2, 1]
     )
+
+
+    with score_col1:
+
+        if st.button(
+            "➖",
+            key=f"minus_{score_key}",
+            use_container_width=True
+        ):
+
+            st.session_state[
+                score_key
+            ] = max(
+                1,
+                st.session_state[
+                    score_key
+                ] - 1
+            )
+
+            st.rerun()
+
+
+    with score_col2:
+
+        st.markdown(
+            f"""
+            <div class="score-display">
+                {st.session_state[score_key]}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+    with score_col3:
+
+        if st.button(
+            "➕",
+            key=f"plus_{score_key}",
+            use_container_width=True
+        ):
+
+            st.session_state[
+                score_key
+            ] = min(
+                20,
+                st.session_state[
+                    score_key
+                ] + 1
+            )
+
+            st.rerun()
+
 
     entered_scores[
         player_id
-    ] = score
+    ] = st.session_state[
+        score_key
+    ]
 
 
 # ============================================================
@@ -973,7 +1329,7 @@ for player in group_players:
 st.divider()
 
 st.subheader(
-    "📊 Hole Preview"
+    "📊 Hole Results"
 )
 
 
@@ -986,11 +1342,13 @@ for player in group_players:
         player["player_id"]
     ]
 
+
     net = calculate_net_score(
         gross,
         player["event_handicap"],
         stroke_index
     )
+
 
     ips = calculate_ips_points(
         gross,
@@ -998,6 +1356,7 @@ for player in group_players:
         player["event_handicap"],
         stroke_index
     )
+
 
     preview_rows.append(
         {
@@ -1041,7 +1400,7 @@ st.divider()
 if status == "LIVE":
 
     if st.button(
-        f"💾 Save Hole {selected_hole}",
+        f"💾 SAVE HOLE {current_hole}",
         type="primary",
         use_container_width=True
     ):
@@ -1051,25 +1410,49 @@ if status == "LIVE":
             save_hole_scores(
                 event_id,
                 scorer_id,
-                selected_hole,
+                current_hole,
                 entered_scores
             )
 
+
             st.success(
-                f"Hole {selected_hole} saved!"
+                f"✅ Hole {current_hole} saved!"
             )
 
-            # -----------------------------------------------
-            # ADVANCE TO NEXT HOLE
-            # -----------------------------------------------
 
-            if selected_hole < 18:
+            # ------------------------------------------------
+            # Clear current hole's widget state
+            # ------------------------------------------------
+
+            for player in group_players:
+
+                score_key = (
+                    f"mobile_score_"
+                    f"{event_id}_"
+                    f"{group_number}_"
+                    f"{current_hole}_"
+                    f"{player['player_id']}"
+                )
+
+                if score_key in st.session_state:
+
+                    del st.session_state[
+                        score_key
+                    ]
+
+
+            # ------------------------------------------------
+            # Move forward
+            # ------------------------------------------------
+
+            if current_hole < 18:
 
                 st.session_state[
                     current_hole_key
-                ] = selected_hole + 1
+                ] = current_hole + 1
 
             st.rerun()
+
 
         except Exception as error:
 
@@ -1082,12 +1465,12 @@ if status == "LIVE":
 else:
 
     st.warning(
-        "This event is no longer accepting score edits."
+        "🔒 This event is no longer accepting score edits."
     )
 
 
 # ============================================================
-# BUILD SCORE DICTIONARIES
+# SCORE DICTIONARIES
 # ============================================================
 
 score_dicts = {}
@@ -1103,6 +1486,7 @@ for player in players:
         player_id
     ] = {}
 
+
     for hole_number in hole_options:
 
         score = score_lookup.get(
@@ -1112,6 +1496,7 @@ for player in players:
             )
         )
 
+
         if score is not None:
 
             score_dicts[
@@ -1120,7 +1505,7 @@ for player in players:
 
 
 # ============================================================
-# CALCULATE LIVE ROUND RESULTS
+# LIVE ROUND RESULTS
 # ============================================================
 
 round_results = []
@@ -1138,9 +1523,109 @@ for player in players:
         ]
     )
 
+
     round_results.append(
         result
     )
+
+
+# ============================================================
+# PROGRESS
+# ============================================================
+
+st.divider()
+
+st.subheader(
+    "📈 Fourball Progress"
+)
+
+
+progress_rows = []
+
+
+for result in round_results:
+
+    # Only players in this scorer's fourball
+
+    group_player_ids = [
+        player["player_id"]
+        for player in group_players
+    ]
+
+
+    if result["player_id"] not in group_player_ids:
+
+        continue
+
+
+    progress_rows.append(
+        {
+            "Player":
+                result["name"],
+
+            "Holes":
+                f"{result['completed']}/18",
+
+            "Net":
+                result["net_total"],
+
+            "IPS":
+                result["ips_total"]
+        }
+    )
+
+
+progress_df = pd.DataFrame(
+    progress_rows
+)
+
+
+st.dataframe(
+    progress_df,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# ============================================================
+# HOLE NAVIGATION
+# ============================================================
+
+st.divider()
+
+previous_col, next_col = st.columns(2)
+
+
+with previous_col:
+
+    if current_hole > 1:
+
+        if st.button(
+            "⬅️ Previous Hole",
+            use_container_width=True
+        ):
+
+            st.session_state[
+                current_hole_key
+            ] = current_hole - 1
+
+            st.rerun()
+
+
+with next_col:
+
+    if current_hole < 18:
+
+        if st.button(
+            "Next Hole ➡️",
+            use_container_width=True
+        ):
+
+            st.session_state[
+                current_hole_key
+            ] = current_hole + 1
+
+            st.rerun()
 
 
 # ============================================================
@@ -1231,6 +1716,7 @@ st.dataframe(
 
 st.divider()
 
+
 all_complete = all(
     result["completed"] == 18
     for result in round_results
@@ -1243,6 +1729,7 @@ if all_complete:
         "🎉 All players have completed 18 holes!"
     )
 
+
     if status == "LIVE":
 
         st.warning(
@@ -1250,6 +1737,7 @@ if all_complete:
             "lock the scores and award official "
             "ranking points."
         )
+
 
         if st.button(
             "🏆 FINALIZE & CLOSE EVENT",
@@ -1269,17 +1757,22 @@ if all_complete:
                     score_dicts
                 )
 
+
                 st.success(
                     "🏆 Event finalized successfully!"
                 )
 
+
                 st.balloons()
+
 
                 st.subheader(
                     "🏆 Official Results"
                 )
 
+
                 result_rows = []
+
 
                 for result in final_results:
 
@@ -1291,7 +1784,9 @@ if all_complete:
                                 ],
 
                             "Player":
-                                result["name"],
+                                result[
+                                    "name"
+                                ],
 
                             "Gross":
                                 result[
@@ -1333,6 +1828,7 @@ if all_complete:
                     "Scores can no longer be edited."
                 )
 
+
                 st.stop()
 
 
@@ -1359,7 +1855,9 @@ else:
             result["name"],
             result["completed"]
         )
+
         for result in round_results
+
         if result["completed"] < 18
     ]
 
