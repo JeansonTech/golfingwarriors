@@ -296,6 +296,78 @@ def start_event(event_id):
 
         connection.close()
 
+def delete_event(event_id):
+
+    connection = get_connection()
+
+    try:
+
+        with connection.cursor() as cursor:
+
+            # Delete scores
+            cursor.execute(
+                """
+                DELETE FROM hole_scores
+                WHERE event_id = %s
+                """,
+                (int(event_id),)
+            )
+
+            # Delete results
+            cursor.execute(
+                """
+                DELETE FROM event_results
+                WHERE event_id = %s
+                """,
+                (int(event_id),)
+            )
+
+            # Delete ranking points
+            cursor.execute(
+                """
+                DELETE FROM ranking_points
+                WHERE event_id = %s
+                """,
+                (int(event_id),)
+            )
+
+            # Delete event players
+            cursor.execute(
+                """
+                DELETE FROM event_players
+                WHERE event_id = %s
+                """,
+                (int(event_id),)
+            )
+
+            # Delete event hole snapshot
+            cursor.execute(
+                """
+                DELETE FROM event_holes
+                WHERE event_id = %s
+                """,
+                (int(event_id),)
+            )
+
+            # Finally delete the event
+            cursor.execute(
+                """
+                DELETE FROM events
+                WHERE id = %s
+                """,
+                (int(event_id),)
+            )
+
+        connection.commit()
+
+    except Exception:
+
+        connection.rollback()
+        raise
+
+    finally:
+
+        connection.close()
 
 # ============================================================
 # PAGE
@@ -774,21 +846,100 @@ else:
             st.write(status)
 
 
-        if event["status"] == "DRAFT":
+       if event["status"] == "DRAFT":
+
+    col_start, col_delete = st.columns(2)
+
+    with col_start:
+
+        if st.button(
+            "🟢 Start Event",
+            key=f"start_{event['id']}"
+        ):
+
+            start_event(
+                event["id"]
+            )
+
+            st.success(
+                "Event is now LIVE!"
+            )
+
+            st.rerun()
+
+    with col_delete:
+
+        if st.button(
+            "🗑️ Delete Event",
+            key=f"delete_{event['id']}"
+        ):
+
+            st.session_state[
+                f"confirm_delete_{event['id']}"
+            ] = True
+
+
+    if st.session_state.get(
+        f"confirm_delete_{event['id']}",
+        False
+    ):
+
+        st.error(
+            "⚠️ Are you absolutely sure?"
+        )
+
+        st.warning(
+            "Deleting this event will permanently "
+            "remove the event, players, course snapshot, "
+            "scores, results and ranking points."
+        )
+
+        confirm_col1, confirm_col2 = st.columns(2)
+
+        with confirm_col1:
 
             if st.button(
-                "🟢 Start Event",
-                key=f"start_{event['id']}"
+                "YES — DELETE PERMANENTLY",
+                key=f"confirm_yes_{event['id']}",
+                type="primary"
             ):
 
-                start_event(
-                    event["id"]
-                )
+                try:
 
-                st.success(
-                    "Event is now LIVE!"
+                    delete_event(
+                        event["id"]
+                    )
+
+                    st.session_state.pop(
+                        f"confirm_delete_{event['id']}",
+                        None
+                    )
+
+                    st.success(
+                        "Event permanently deleted."
+                    )
+
+                    st.rerun()
+
+                except Exception as error:
+
+                    st.error(
+                        "Unable to delete event."
+                    )
+
+                    st.exception(error)
+
+        with confirm_col2:
+
+            if st.button(
+                "Cancel",
+                key=f"confirm_no_{event['id']}"
+            ):
+
+                st.session_state.pop(
+                    f"confirm_delete_{event['id']}",
+                    None
                 )
 
                 st.rerun()
-
         st.divider()
