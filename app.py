@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 
+
 from database import (
     init_database,
     test_connection,
@@ -21,7 +22,74 @@ st.set_page_config(
 
 
 # ============================================================
-# DATABASE
+# MOBILE / DESKTOP STYLING
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+        max-width: 1200px;
+    }
+
+    div[data-testid="stMetric"] {
+        border: 1px solid rgba(128,128,128,0.22);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(128,128,128,0.035);
+    }
+
+    div.stButton > button {
+        min-height: 48px;
+        border-radius: 10px;
+        font-weight: 700;
+    }
+
+    @media (max-width: 768px) {
+
+        .block-container {
+            padding-left: 0.65rem;
+            padding-right: 0.65rem;
+            padding-top: 0.65rem;
+        }
+
+        h1 {
+            font-size: 1.75rem !important;
+        }
+
+        h2 {
+            font-size: 1.35rem !important;
+        }
+
+        h3 {
+            font-size: 1.1rem !important;
+        }
+
+        div[data-testid="stMetric"] {
+            padding: 9px;
+        }
+
+        div[data-testid="stMetricValue"] {
+            font-size: 1.35rem;
+        }
+
+        div[data-testid="stMetricLabel"] {
+            font-size: 0.75rem;
+        }
+
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# DATABASE INITIALISATION
 # ============================================================
 
 try:
@@ -80,6 +148,7 @@ def get_total_event_count():
                 """
                 SELECT COUNT(*)
                 FROM events
+                WHERE status <> 'DELETED'
                 """
             )
 
@@ -125,9 +194,13 @@ def get_active_season():
                 id,
                 name,
                 year
+
             FROM seasons
+
             WHERE active = TRUE
+
             ORDER BY year DESC
+
             LIMIT 1
             """,
             connection
@@ -461,14 +534,14 @@ active_season_df = (
 
 
 # ============================================================
-# HEADER
+# MAIN HEADER
 # ============================================================
 
 st.title(
     "🏌️ Golfing Warriors"
 )
 
-st.subheader(
+st.caption(
     "Your friends. Your golf. Your championship."
 )
 
@@ -485,10 +558,6 @@ if not active_season_df.empty:
 
     season_year = season["year"]
 
-    st.markdown(
-        f"## 🏆 {season_name}"
-    )
-
 else:
 
     season_id = None
@@ -496,6 +565,23 @@ else:
     season_name = None
 
     season_year = None
+
+
+# ============================================================
+# SEASON HEADER
+# ============================================================
+
+if season_id is not None:
+
+    st.subheader(
+        f"🏆 {season_name}"
+    )
+
+    st.caption(
+        f"{season_year} Championship"
+    )
+
+else:
 
     st.info(
         "No active season has been set up yet."
@@ -508,7 +594,7 @@ else:
 
 st.divider()
 
-stat1, stat2, stat3 = st.columns(3)
+stat1, stat2 = st.columns(2)
 
 
 with stat1:
@@ -525,6 +611,9 @@ with stat2:
         "🏆 Events Completed",
         closed_events
     )
+
+
+stat3, stat4 = st.columns(2)
 
 
 with stat3:
@@ -569,7 +658,7 @@ else:
 
 
 # ============================================================
-# CHAMPIONSHIP LEADER
+# CHAMPIONSHIP
 # ============================================================
 
 st.divider()
@@ -583,165 +672,223 @@ if leaderboard.empty:
 
     st.info(
         "No championship points have been "
-        "awarded yet. The first event is waiting!"
+        "awarded yet."
     )
 
 else:
 
     leader = leaderboard.iloc[0]
 
-    leader_col1, leader_col2 = st.columns(
-        [2, 1]
+    leader_name = leader["name"]
+
+    leader_points = float(
+        leader["total_points"]
+    )
+
+    leader_events = int(
+        leader["events_played"]
+    )
+
+    leader_wins = int(
+        leader["wins"]
+    )
+
+    leader_podiums = int(
+        leader["podiums"]
+    )
+
+
+    # --------------------------------------------------------
+    # CURRENT LEADER
+    # --------------------------------------------------------
+
+    st.success(
+        f"🥇 **Current Leader: {leader_name}**"
+    )
+
+
+    leader_col1, leader_col2, leader_col3 = (
+        st.columns(3)
     )
 
 
     with leader_col1:
 
-        st.markdown(
-            f"# 🥇 {leader['name']}"
-        )
-
-        st.markdown(
-            f"### {float(leader['total_points']):g} Championship Points"
-        )
-
-        st.caption(
-            f"{int(leader['events_played'])} events • "
-            f"{int(leader['wins'])} wins • "
-            f"{int(leader['podiums'])} podiums"
+        st.metric(
+            "Championship Points",
+            f"{leader_points:g}"
         )
 
 
     with leader_col2:
 
         st.metric(
-            "Points",
-            f"{float(leader['total_points']):g}"
+            "Wins",
+            leader_wins
         )
 
 
-    # --------------------------------------------------------
-    # TOP 3
-    # --------------------------------------------------------
+    with leader_col3:
 
-    st.subheader(
-        "🥇 Current Top 3"
+        st.metric(
+            "Podiums",
+            leader_podiums
+        )
+
+
+    st.caption(
+        f"{leader_events} event"
+        f"{'s' if leader_events != 1 else ''} played"
     )
 
 
-    top3 = leaderboard.head(3)
+    # --------------------------------------------------------
+    # TOP 5
+    # --------------------------------------------------------
+
+    st.subheader(
+        "🥇 Championship Top 5"
+    )
+
+
+    top5 = leaderboard.head(5)
 
 
     top_rows = []
 
 
+    medals = {
+        1: "🥇",
+        2: "🥈",
+        3: "🥉"
+    }
+
+
     for position, (_, row) in enumerate(
-        top3.iterrows(),
+        top5.iterrows(),
         start=1
     ):
 
-        if position == 1:
+        if position in medals:
 
-            medal = "🥇"
-
-        elif position == 2:
-
-            medal = "🥈"
+            display_position = (
+                f"{medals[position]} "
+                f"{position}"
+            )
 
         else:
 
-            medal = "🥉"
+            display_position = (
+                f"{position}"
+            )
 
 
         top_rows.append(
             {
-                "Position":
-                    f"{medal} {position}",
+                "Pos":
+                    display_position,
 
                 "Player":
                     row["name"],
 
                 "Points":
                     float(
-                        row[
-                            "total_points"
-                        ]
+                        row["total_points"]
                     ),
 
                 "Events":
                     int(
-                        row[
-                            "events_played"
-                        ]
+                        row["events_played"]
+                    ),
+
+                "Wins":
+                    int(
+                        row["wins"]
                     )
             }
         )
 
 
-    top3_df = pd.DataFrame(
+    top5_df = pd.DataFrame(
         top_rows
     )
 
 
     st.dataframe(
-        top3_df,
+        top5_df,
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        column_config={
+            "Points":
+                st.column_config.NumberColumn(
+                    "Points",
+                    format="%.0f"
+                ),
+
+            "Events":
+                st.column_config.NumberColumn(
+                    "Events",
+                    format="%d"
+                ),
+
+            "Wins":
+                st.column_config.NumberColumn(
+                    "Wins",
+                    format="%d"
+                )
+        }
     )
-
-
-# ============================================================
-# NEXT EVENT / LAST EVENT
-# ============================================================
-
-st.divider()
-
-event_col1, event_col2 = st.columns(2)
 
 
 # ============================================================
 # NEXT EVENT
 # ============================================================
 
-with event_col1:
+st.divider()
+
+st.header(
+    "📅 What's Next?"
+)
+
+
+if next_event.empty:
+
+    st.info(
+        "No upcoming event has been scheduled yet."
+    )
+
+else:
+
+    upcoming = next_event.iloc[0]
+
 
     st.subheader(
-        "📅 Next Event"
+        f"⛳ {upcoming['name']}"
     )
 
 
-    if next_event.empty:
-
-        st.info(
-            "No upcoming event has been scheduled yet."
-        )
-
-    else:
-
-        upcoming = (
-            next_event.iloc[0]
-        )
+    next_col1, next_col2 = st.columns(2)
 
 
-        st.markdown(
-            f"### ⛳ {upcoming['name']}"
-        )
-
+    with next_col1:
 
         st.write(
             f"📅 **{upcoming['event_date']}**"
         )
 
         st.write(
-            f"🏌️ **{upcoming['course_name']}**"
+            f"⛳ **{upcoming['course_name']}**"
         )
+
+
+    with next_col2:
 
         st.write(
             f"🏆 **{upcoming['format']}**"
         )
 
-        st.caption(
-            f"Status: {upcoming['status']}"
+        st.write(
+            f"🟢 **{upcoming['status']}**"
         )
 
 
@@ -749,80 +896,85 @@ with event_col1:
 # LAST EVENT
 # ============================================================
 
-with event_col2:
+st.divider()
+
+st.header(
+    "🏆 Last Battle"
+)
+
+
+if last_event.empty:
+
+    st.info(
+        "No completed events yet."
+    )
+
+else:
+
+    previous = last_event.iloc[0]
+
 
     st.subheader(
-        "🏆 Last Event"
+        f"⛳ {previous['name']}"
     )
 
 
-    if last_event.empty:
-
-        st.info(
-            "No completed events yet."
-        )
-
-    else:
-
-        previous = (
-            last_event.iloc[0]
-        )
+    last_col1, last_col2 = st.columns(2)
 
 
-        st.markdown(
-            f"### ⛳ {previous['name']}"
-        )
-
+    with last_col1:
 
         st.write(
             f"📅 **{previous['event_date']}**"
         )
 
         st.write(
-            f"🏌️ **{previous['course_name']}**"
+            f"⛳ **{previous['course_name']}**"
         )
+
+
+    with last_col2:
 
         st.write(
             f"🏆 **{previous['format']}**"
         )
 
 
-        winner_df = (
-            get_last_event_winner(
-                int(previous["id"])
+    winner_df = (
+        get_last_event_winner(
+            int(previous["id"])
+        )
+    )
+
+
+    if not winner_df.empty:
+
+        winner = winner_df.iloc[0]
+
+
+        if previous["format"] == "IPS":
+
+            result_text = (
+                f"{int(winner['ips_total'])} IPS"
             )
+
+        else:
+
+            result_text = (
+                f"{int(winner['net_total'])} Net"
+            )
+
+
+        st.success(
+            f"🥇 **{winner['name']}** "
+            f"won with **{result_text}**"
         )
 
 
-        if not winner_df.empty:
-
-            winner = (
-                winner_df.iloc[0]
-            )
-
-
-            if previous["format"] == "IPS":
-
-                result_text = (
-                    f"{int(winner['ips_total'])} IPS"
-                )
-
-            else:
-
-                result_text = (
-                    f"{int(winner['net_total'])} Net"
-                )
-
-
-            st.success(
-                f"🥇 **{winner['name']}** "
-                f"won with {result_text}"
-            )
-
-            st.caption(
-                f"+{float(winner['ranking_points']):g} "
-                f"Championship Points"
-            )
+        st.caption(
+            f"+{float(winner['ranking_points']):g} "
+            f"Championship Points"
+        )
 
 
 # ============================================================
@@ -842,9 +994,12 @@ if (
 
 
     leader_id = int(
-        leaderboard.iloc[0][
-            "player_id"
-        ]
+        leaderboard.iloc[0]["player_id"]
+    )
+
+
+    leader_name = (
+        leaderboard.iloc[0]["name"]
     )
 
 
@@ -864,9 +1019,7 @@ if (
         for _, result in recent.iterrows():
 
             position = int(
-                result[
-                    "final_position"
-                ]
+                result["final_position"]
             )
 
 
@@ -882,28 +1035,74 @@ if (
 
                 icon = "🥉"
 
-            else:
+            elif position <= 10:
 
                 icon = f"{position}"
 
+            else:
+
+                icon = "•"
+
 
             form_items.append(
-                f"{icon}"
+                icon
             )
 
 
-        st.markdown(
-            "### "
-            + "  ".join(
-                form_items
-            )
+        st.write(
+            "  ".join(form_items)
         )
 
 
         st.caption(
             f"Recent results for "
-            f"**{leaderboard.iloc[0]['name']}** "
-            f"(most recent first)"
+            f"**{leader_name}** "
+            f"— most recent first"
+        )
+
+
+        recent_display = []
+
+
+        for _, result in recent.iterrows():
+
+            recent_display.append(
+                {
+                    "Event":
+                        result["event_name"],
+
+                    "Format":
+                        result["format"],
+
+                    "Position":
+                        int(
+                            result["final_position"]
+                        ),
+
+                    "Points":
+                        float(
+                            result["ranking_points"]
+                        )
+                }
+            )
+
+
+        recent_df = pd.DataFrame(
+            recent_display
+        )
+
+
+        st.dataframe(
+            recent_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Points":
+                    st.column_config.NumberColumn(
+                        "Points",
+                        format="%.0f"
+                    )
+            }
         )
 
 
@@ -918,7 +1117,7 @@ st.header(
 )
 
 
-quick1, quick2, quick3, quick4 = st.columns(4)
+quick1, quick2 = st.columns(2)
 
 
 with quick1:
@@ -943,6 +1142,9 @@ with quick2:
         st.switch_page(
             "pages/leaderboards.py"
         )
+
+
+quick3, quick4 = st.columns(2)
 
 
 with quick3:
