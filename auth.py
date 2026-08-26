@@ -71,51 +71,134 @@ def render_admin_sidebar():
     return False
 
 def render_app_sidebar():
-    """Render the finished Golfing Warriors sidebar navigation."""
-    # Reset this per-run guard. Streamlit session state persists across
-    # reruns, but the sidebar itself is rendered fresh on every run.
-    st.session_state[SIDEBAR_ADMIN_RENDERED_KEY] = False
+    """
+    Render the custom Golfing Warriors sidebar.
 
-    st.sidebar.markdown(
-        """
-        <style>
-        [data-testid="stSidebarNav"] { display: none !important; }
-        section[data-testid="stSidebar"] .block-container {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
-        }
-        .gw-nav-title {
-            font-size: 1.35rem;
-            font-weight: 900;
-            line-height: 1.1;
-            margin-bottom: 4px;
-        }
-        .gw-nav-subtitle {
-            font-size: .78rem;
-            opacity: .65;
-            line-height: 1.35;
-            margin-bottom: 14px;
-        }
-        .gw-nav-section {
-            font-size: .72rem;
-            font-weight: 800;
-            opacity: .55;
-            text-transform: uppercase;
-            letter-spacing: .08em;
-            margin: 14px 0 4px 2px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    Navigation uses the registered Streamlit Page objects
+    from navigation.py so it works correctly with
+    st.navigation().
+    """
+
+    from navigation import (
+        DASHBOARD,
+        LEADERBOARDS,
+        RESULTS,
+        PLAYER_PROFILES,
+        GOLF_STATISTICS,
+        LIVE_SCORING,
+        PLAYERS,
+        SEASONS,
+        COURSES,
+        EVENTS,
+        RANKING_SETTINGS,
     )
 
     st.sidebar.markdown(
         """
-        <div class="gw-nav-title">🏌️ Golfing Warriors</div>
-        <div class="gw-nav-subtitle">Your friends. Your golf.<br>Your championship.</div>
+        <div style="
+            padding: 10px 0 5px 0;
+        ">
+            <h2 style="margin-bottom: 0;">
+                🏌️ Golfing Warriors
+            </h2>
+            <p style="
+                margin-top: 4px;
+                color: #9ca3af;
+            ">
+                Your friends. Your golf.<br>
+                Your championship.
+            </p>
+        </div>
         """,
         unsafe_allow_html=True,
     )
+
+    # ========================================================
+    # HOME
+    # ========================================================
+
+    st.sidebar.markdown("### HOME")
+
+    st.sidebar.page_link(
+        DASHBOARD,
+        label="🏠 Dashboard",
+    )
+
+    # ========================================================
+    # CHAMPIONSHIP
+    # ========================================================
+
+    st.sidebar.markdown("### CHAMPIONSHIP")
+
+    st.sidebar.page_link(
+        LEADERBOARDS,
+        label="🏆 Leaderboards",
+    )
+
+    st.sidebar.page_link(
+        RESULTS,
+        label="📋 Results",
+    )
+
+    st.sidebar.page_link(
+        PLAYER_PROFILES,
+        label="👤 Player Profiles",
+    )
+
+    st.sidebar.page_link(
+        GOLF_STATISTICS,
+        label="📊 Golf Statistics",
+    )
+
+    # ========================================================
+    # GOLF
+    # ========================================================
+
+    st.sidebar.markdown("### GOLF")
+
+    st.sidebar.page_link(
+        LIVE_SCORING,
+        label="📱 Live Scoring",
+    )
+
+    # ========================================================
+    # ADMIN
+    # ========================================================
+
+    if is_admin():
+
+        st.sidebar.markdown("### ADMINISTRATION")
+
+        st.sidebar.page_link(
+            PLAYERS,
+            label="👥 Players",
+        )
+
+        st.sidebar.page_link(
+            SEASONS,
+            label="📅 Seasons",
+        )
+
+        st.sidebar.page_link(
+            COURSES,
+            label="⛳ Courses",
+        )
+
+        st.sidebar.page_link(
+            EVENTS,
+            label="🏆 Events",
+        )
+
+        st.sidebar.page_link(
+            RANKING_SETTINGS,
+            label="⚙️ Ranking Settings",
+        )
+
+    # ========================================================
+    # ADMIN LOGIN / LOGOUT
+    # ========================================================
+
+    render_admin_sidebar()
 
     def existing_page(*names):
         pages_dir = Path(__file__).resolve().parent / "pages"
