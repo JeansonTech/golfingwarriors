@@ -191,6 +191,11 @@ def create_event(
 
         return int(event_id)
 
+    except Exception:
+
+        connection.rollback()
+        raise
+
     finally:
 
         connection.close()
@@ -232,6 +237,11 @@ def add_event_players(
                 )
 
         connection.commit()
+
+    except Exception:
+
+        connection.rollback()
+        raise
 
     finally:
 
@@ -292,11 +302,31 @@ def start_event(event_id):
 
         connection.commit()
 
+    except Exception:
+
+        connection.rollback()
+        raise
+
     finally:
 
         connection.close()
 
+
 def delete_event(event_id):
+
+    """
+    Permanently delete an event and all information
+    belonging to that event.
+
+    This includes:
+
+    - Hole scores
+    - Results
+    - Ranking points
+    - Event players
+    - Event hole snapshot
+    - Event itself
+    """
 
     connection = get_connection()
 
@@ -304,7 +334,10 @@ def delete_event(event_id):
 
         with connection.cursor() as cursor:
 
-            # Delete scores
+            # -------------------------------------------------
+            # DELETE HOLE SCORES
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 DELETE FROM hole_scores
@@ -313,7 +346,10 @@ def delete_event(event_id):
                 (int(event_id),)
             )
 
-            # Delete results
+            # -------------------------------------------------
+            # DELETE EVENT RESULTS
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 DELETE FROM event_results
@@ -322,7 +358,10 @@ def delete_event(event_id):
                 (int(event_id),)
             )
 
-            # Delete ranking points
+            # -------------------------------------------------
+            # DELETE RANKING POINTS
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 DELETE FROM ranking_points
@@ -331,7 +370,10 @@ def delete_event(event_id):
                 (int(event_id),)
             )
 
-            # Delete event players
+            # -------------------------------------------------
+            # DELETE EVENT PLAYERS
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 DELETE FROM event_players
@@ -340,7 +382,10 @@ def delete_event(event_id):
                 (int(event_id),)
             )
 
-            # Delete event hole snapshot
+            # -------------------------------------------------
+            # DELETE EVENT HOLE SNAPSHOT
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 DELETE FROM event_holes
@@ -349,7 +394,10 @@ def delete_event(event_id):
                 (int(event_id),)
             )
 
-            # Finally delete the event
+            # -------------------------------------------------
+            # DELETE EVENT
+            # -------------------------------------------------
+
             cursor.execute(
                 """
                 DELETE FROM events
@@ -368,6 +416,7 @@ def delete_event(event_id):
     finally:
 
         connection.close()
+
 
 # ============================================================
 # PAGE
@@ -458,7 +507,9 @@ event_date = st.date_input(
 )
 
 
-# Course selection
+# ------------------------------------------------------------
+# COURSE SELECTION
+# ------------------------------------------------------------
 
 course_options = {}
 
@@ -482,6 +533,10 @@ selected_course = course_options[
     selected_course_label
 ]
 
+
+# ------------------------------------------------------------
+# FORMAT
+# ------------------------------------------------------------
 
 event_format = st.radio(
     "Competition Format",
@@ -649,7 +704,8 @@ st.subheader("4️⃣ Event Handicaps")
 
 st.caption(
     "These handicaps are stored specifically "
-    "for this event."
+    "for this event and can be changed without "
+    "changing the player's normal handicap."
 )
 
 final_event_players = []
@@ -692,6 +748,10 @@ for player in final_event_players:
     groups[group].append(player)
 
 
+# ------------------------------------------------------------
+# CHECK FOURBALLS
+# ------------------------------------------------------------
+
 for group_number, group_players in groups.items():
 
     scorers = [
@@ -700,12 +760,16 @@ for group_number, group_players in groups.items():
         if player["is_scorer"]
     ]
 
+    # Exactly one scorer
+
     if len(scorers) != 1:
 
         errors.append(
             f"Fourball {group_number} must have "
             f"exactly ONE scorer."
         )
+
+    # Maximum four players
 
     if len(group_players) > 4:
 
@@ -715,6 +779,10 @@ for group_number, group_players in groups.items():
         )
 
 
+# ------------------------------------------------------------
+# EVENT NAME
+# ------------------------------------------------------------
+
 if not event_name.strip():
 
     errors.append(
@@ -723,10 +791,99 @@ if not event_name.strip():
 
 
 # ============================================================
+# EVENT SUMMARY
+# ============================================================
+
+st.subheader("5️⃣ Event Summary")
+
+summary_col1, summary_col2, summary_col3 = st.columns(3)
+
+with summary_col1:
+
+    st.metric(
+        "Players",
+        len(final_event_players)
+    )
+
+with summary_col2:
+
+    st.metric(
+        "Fourballs",
+        len(groups)
+    )
+
+with summary_col3:
+
+    st.metric(
+        "Format",
+        event_format
+    )
+
+
+# ============================================================
+# SHOW FOURBALL SUMMARY
+# ============================================================
+
+with st.expander(
+    "👥 Review Fourball Groups",
+    expanded=True
+):
+
+    for group_number in sorted(groups):
+
+        group_players = groups[group_number]
+
+        scorer_names = [
+            player["name"]
+            for player in group_players
+            if player["is_scorer"]
+        ]
+
+        scorer_name = (
+            scorer_names[0]
+            if len(scorer_names) == 1
+            else "⚠️ Invalid scorer setup"
+        )
+
+        st.markdown(
+            f"### Fourball {group_number}"
+        )
+
+        for player in group_players:
+
+            scorer_label = (
+                " 📝 **SCORER**"
+                if player["is_scorer"]
+                else ""
+            )
+
+            st.write(
+                f"- {player['name']} "
+                f"— HCP {player['handicap']:g}"
+                f"{scorer_label}"
+            )
+
+        if len(scorer_names) == 1:
+
+            st.success(
+                f"Scorer: {scorer_name}"
+            )
+
+        else:
+
+            st.error(
+                "This fourball must have exactly "
+                "one scorer."
+            )
+
+
+# ============================================================
 # CREATE EVENT
 # ============================================================
 
-st.subheader("5️⃣ Create Event")
+st.divider()
+
+st.subheader("6️⃣ Create Event")
 
 if errors:
 
@@ -747,6 +904,8 @@ else:
 
         try:
 
+            # Create event and copy course snapshot
+
             event_id = create_event(
                 active_season["id"],
                 selected_course["id"],
@@ -754,6 +913,8 @@ else:
                 event_date,
                 event_format
             )
+
+            # Add participating players
 
             add_event_players(
                 event_id,
@@ -800,6 +961,10 @@ else:
 
     for _, event in events.iterrows():
 
+        # ----------------------------------------------------
+        # STATUS
+        # ----------------------------------------------------
+
         if event["status"] == "DRAFT":
 
             status = "📝 DRAFT"
@@ -816,6 +981,10 @@ else:
 
             status = "🔒 CLOSED"
 
+
+        # ----------------------------------------------------
+        # EVENT HEADER
+        # ----------------------------------------------------
 
         st.markdown(
             f"### {event['name']}"
@@ -846,100 +1015,154 @@ else:
             st.write(status)
 
 
-       if event["status"] == "DRAFT":
+        # ----------------------------------------------------
+        # DRAFT EVENT CONTROLS
+        # ----------------------------------------------------
 
-    col_start, col_delete = st.columns(2)
+        if event["status"] == "DRAFT":
 
-    with col_start:
+            col_start, col_delete = st.columns(2)
 
-        if st.button(
-            "🟢 Start Event",
-            key=f"start_{event['id']}"
-        ):
+            # ------------------------------------------------
+            # START EVENT
+            # ------------------------------------------------
 
-            start_event(
-                event["id"]
-            )
+            with col_start:
 
-            st.success(
-                "Event is now LIVE!"
-            )
+                if st.button(
+                    "🟢 Start Event",
+                    key=f"start_{event['id']}"
+                ):
 
-            st.rerun()
+                    try:
 
-    with col_delete:
+                        start_event(
+                            event["id"]
+                        )
 
-        if st.button(
-            "🗑️ Delete Event",
-            key=f"delete_{event['id']}"
-        ):
+                        st.success(
+                            "Event is now LIVE!"
+                        )
 
-            st.session_state[
-                f"confirm_delete_{event['id']}"
-            ] = True
+                        st.rerun()
+
+                    except Exception as error:
+
+                        st.error(
+                            "Unable to start event."
+                        )
+
+                        st.exception(error)
 
 
-    if st.session_state.get(
-        f"confirm_delete_{event['id']}",
-        False
-    ):
+            # ------------------------------------------------
+            # DELETE EVENT
+            # ------------------------------------------------
 
-        st.error(
-            "⚠️ Are you absolutely sure?"
-        )
+            with col_delete:
 
-        st.warning(
-            "Deleting this event will permanently "
-            "remove the event, players, course snapshot, "
-            "scores, results and ranking points."
-        )
+                if st.button(
+                    "🗑️ Delete Event",
+                    key=f"delete_{event['id']}"
+                ):
 
-        confirm_col1, confirm_col2 = st.columns(2)
+                    st.session_state[
+                        f"confirm_delete_{event['id']}"
+                    ] = True
 
-        with confirm_col1:
 
-            if st.button(
-                "YES — DELETE PERMANENTLY",
-                key=f"confirm_yes_{event['id']}",
-                type="primary"
+            # ------------------------------------------------
+            # DELETE CONFIRMATION
+            # ------------------------------------------------
+
+            if st.session_state.get(
+                f"confirm_delete_{event['id']}",
+                False
             ):
 
-                try:
-
-                    delete_event(
-                        event["id"]
-                    )
-
-                    st.session_state.pop(
-                        f"confirm_delete_{event['id']}",
-                        None
-                    )
-
-                    st.success(
-                        "Event permanently deleted."
-                    )
-
-                    st.rerun()
-
-                except Exception as error:
-
-                    st.error(
-                        "Unable to delete event."
-                    )
-
-                    st.exception(error)
-
-        with confirm_col2:
-
-            if st.button(
-                "Cancel",
-                key=f"confirm_no_{event['id']}"
-            ):
-
-                st.session_state.pop(
-                    f"confirm_delete_{event['id']}",
-                    None
+                st.error(
+                    "⚠️ Are you absolutely sure?"
                 )
 
-                st.rerun()
+                st.warning(
+                    "Deleting this event will permanently "
+                    "remove the event, players, course snapshot, "
+                    "scores, results and ranking points."
+                )
+
+                confirm_col1, confirm_col2 = st.columns(2)
+
+                with confirm_col1:
+
+                    if st.button(
+                        "YES — DELETE PERMANENTLY",
+                        key=f"confirm_yes_{event['id']}",
+                        type="primary"
+                    ):
+
+                        try:
+
+                            delete_event(
+                                event["id"]
+                            )
+
+                            st.session_state.pop(
+                                f"confirm_delete_{event['id']}",
+                                None
+                            )
+
+                            st.success(
+                                "Event permanently deleted."
+                            )
+
+                            st.rerun()
+
+                        except Exception as error:
+
+                            st.error(
+                                "Unable to delete event."
+                            )
+
+                            st.exception(error)
+
+                with confirm_col2:
+
+                    if st.button(
+                        "Cancel",
+                        key=f"confirm_no_{event['id']}"
+                    ):
+
+                        st.session_state.pop(
+                            f"confirm_delete_{event['id']}",
+                            None
+                        )
+
+                        st.rerun()
+
+
+        # ----------------------------------------------------
+        # LIVE EVENT
+        # ----------------------------------------------------
+
+        elif event["status"] == "LIVE":
+
+            st.info(
+                "🟢 This event is currently LIVE. "
+                "Live scoring will be available here "
+                "once the scoring module is added."
+            )
+
+
+        # ----------------------------------------------------
+        # CLOSED EVENT
+        # ----------------------------------------------------
+
+        elif event["status"] == "CLOSED":
+
+            st.success(
+                "🔒 This event is CLOSED. "
+                "Results are locked."
+            )
+
+
         st.divider()
