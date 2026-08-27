@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from database import get_connection
-from auth import is_admin, render_admin_sidebar, require_admin
+from auth import is_admin, require_admin
 
 
 st.set_page_config(
@@ -637,7 +637,7 @@ def delete_event(event_id):
 # ADMIN ACCESS
 # ============================================================
 
-is_admin_session = render_admin_sidebar()
+admin_mode = is_admin()
 
 
 # ============================================================
@@ -650,7 +650,7 @@ st.caption(
     "Create and manage Golfing Warriors events."
 )
 
-is_admin = is_admin_session
+
 
 st.divider()
 
@@ -1124,7 +1124,7 @@ else:
     if st.button(
         "🏌️ Create Golfing Warriors Event",
         type="primary",
-        disabled=not is_admin,
+        disabled=not admin_mode,
         help="Admin access is required to create events."
     ):
 
@@ -1248,7 +1248,7 @@ else:
                     "✏️ Edit Event",
                     key=f"edit_{event_id}",
                     use_container_width=True,
-                    disabled=not is_admin,
+                    disabled=not admin_mode,
                     help="Admin access is required to edit events."
                 ):
                     st.session_state[
@@ -1265,7 +1265,7 @@ else:
                     "🟢 Start Event",
                     key=f"start_{event_id}",
                     use_container_width=True,
-                    disabled=not is_admin,
+                    disabled=not admin_mode,
                     help="Admin access is required to start events."
                 ):
 
@@ -1297,7 +1297,7 @@ else:
                     "🗑️ Delete Event",
                     key=f"delete_{event_id}",
                     use_container_width=True,
-                    disabled=not is_admin,
+                    disabled=not admin_mode,
                     help="Admin access is required to delete events."
                 ):
 
@@ -1309,7 +1309,7 @@ else:
             # EDIT FORM
             # ------------------------------------------------
 
-            if is_admin and st.session_state.get(
+            if admin_mode and st.session_state.get(
                 f"edit_event_{event_id}",
                 False
             ):
@@ -1605,7 +1605,7 @@ else:
             # DELETE CONFIRMATION
             # ------------------------------------------------
 
-            if is_admin and st.session_state.get(
+            if admin_mode and st.session_state.get(
                 f"confirm_delete_{event_id}",
                 False
             ):
@@ -1703,7 +1703,7 @@ else:
                 "Results are locked."
             )
 
-            if is_admin:
+            if admin_mode:
 
                 st.warning(
                     "🔐 Admin Mode: You can permanently "
@@ -1805,4 +1805,3 @@ else:
                 )
 
         st.divider()
-
