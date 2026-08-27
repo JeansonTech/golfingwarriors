@@ -54,9 +54,7 @@ def is_admin():
 def login_admin(password):
     """Authenticate the current session."""
 
-    configured_password = (
-        get_admin_password()
-    )
+    configured_password = get_admin_password()
 
     if not configured_password:
         return False
@@ -65,10 +63,7 @@ def login_admin(password):
         str(password),
         str(configured_password)
     ):
-
-        st.session_state[
-            SESSION_KEY
-        ] = True
+        st.session_state[SESSION_KEY] = True
 
         st.session_state.pop(
             "golfing_warriors_admin_password",
@@ -83,9 +78,7 @@ def login_admin(password):
 def logout_admin():
     """End the current admin session."""
 
-    st.session_state[
-        SESSION_KEY
-    ] = False
+    st.session_state[SESSION_KEY] = False
 
     st.session_state.pop(
         "golfing_warriors_admin_password",
@@ -105,9 +98,8 @@ def render_app_sidebar():
     from navigation.py.
     """
 
-    # Import here deliberately.
-    # This prevents navigation objects being created simply
-    # because auth.py is imported.
+    # Import here deliberately so that navigation objects
+    # are only loaded when the sidebar is rendered.
     from navigation import (
         DASHBOARD,
         LEADERBOARDS,
@@ -122,127 +114,113 @@ def render_app_sidebar():
         RANKING_SETTINGS,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # BRANDING
-    # --------------------------------------------------------
+    # ========================================================
 
-    st.sidebar.markdown(
-        """
-        <div style="
-            padding: 8px 0 12px 0;
-        ">
-            <div style="
-                font-size: 1.35rem;
-                font-weight: 700;
-            ">
-                🏌️ Golfing Warriors
-            </div>
-
-            <div style="
-                margin-top: 5px;
-                color: #9ca3af;
-                font-size: 0.85rem;
-            ">
-                Your friends. Your golf.<br>
-                Your championship.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.sidebar.title(
+        "🏌️ Golfing Warriors"
     )
 
-    # --------------------------------------------------------
+    st.sidebar.caption(
+        "Your friends. Your golf. "
+        "Your championship."
+    )
+
+    st.sidebar.divider()
+
+    # ========================================================
     # HOME
-    # --------------------------------------------------------
+    # ========================================================
 
     st.sidebar.markdown(
-        "### HOME"
+        "### 🏠 HOME"
     )
 
     st.sidebar.page_link(
         DASHBOARD,
-        label="🏠 Dashboard"
+        label="Dashboard"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # CHAMPIONSHIP
-    # --------------------------------------------------------
+    # ========================================================
 
     st.sidebar.markdown(
-        "### CHAMPIONSHIP"
+        "### 🏆 CHAMPIONSHIP"
     )
 
     st.sidebar.page_link(
         LEADERBOARDS,
-        label="🏆 Leaderboards"
+        label="Leaderboards"
     )
 
     st.sidebar.page_link(
         RESULTS,
-        label="📋 Results"
+        label="Results"
     )
 
     st.sidebar.page_link(
         PLAYER_PROFILES,
-        label="👤 Player Profiles"
+        label="Player Profiles"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # GOLF
-    # --------------------------------------------------------
+    # ========================================================
 
     st.sidebar.markdown(
-        "### GOLF"
+        "### ⛳ GOLF"
     )
 
     st.sidebar.page_link(
         GOLF_STATISTICS,
-        label="📊 Golf Statistics"
+        label="Golf Statistics"
     )
 
     st.sidebar.page_link(
         LIVE_SCORING,
-        label="📱 Live Scoring"
+        label="Live Scoring"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # ADMINISTRATION
-    # --------------------------------------------------------
+    # ========================================================
 
     if is_admin():
 
         st.sidebar.markdown(
-            "### ADMINISTRATION"
+            "### ⚙️ ADMINISTRATION"
         )
 
         st.sidebar.page_link(
             PLAYERS,
-            label="👥 Players"
-        )
-
-        st.sidebar.page_link(
-            SEASONS,
-            label="📅 Seasons"
+            label="Players"
         )
 
         st.sidebar.page_link(
             COURSES,
-            label="⛳ Courses"
+            label="Courses"
         )
 
         st.sidebar.page_link(
             EVENTS,
-            label="🏆 Events"
+            label="Events"
+        )
+
+        st.sidebar.page_link(
+            SEASONS,
+            label="Seasons"
         )
 
         st.sidebar.page_link(
             RANKING_SETTINGS,
-            label="⚙️ Ranking Settings"
+            label="Ranking Settings"
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # ADMIN ACCESS
-    # --------------------------------------------------------
+    # ========================================================
 
     render_admin_sidebar()
 
