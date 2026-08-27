@@ -3,6 +3,7 @@ import hmac
 import os
 from pathlib import Path
 import streamlit as st
+from navigation import DASHBOARD
 
 SESSION_KEY = "golfing_warriors_admin"
 PASSWORD_KEY = "GOLFING_WARRIORS_ADMIN_PASSWORD"
@@ -208,7 +209,11 @@ def render_app_sidebar():
         return None
 
     st.sidebar.markdown('<div class="gw-nav-section">Home</div>', unsafe_allow_html=True)
-    st.sidebar.page_link("app.py", label="🏠 Dashboard")
+
+st.sidebar.page_link(
+    DASHBOARD,
+    label="🏠 Dashboard"
+)
 
     st.sidebar.markdown('<div class="gw-nav-section">Competition</div>', unsafe_allow_html=True)
     for candidates, label in [
