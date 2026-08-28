@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+import os
+
 from database import get_connection
-from auth import is_admin, require_admin
 
 
 st.set_page_config(
@@ -124,8 +125,6 @@ def create_event(
     event_format
 ):
 
-    require_admin()
-
     connection = get_connection()
 
     try:
@@ -208,8 +207,6 @@ def add_event_players(
     players
 ):
 
-    require_admin()
-
     connection = get_connection()
 
     try:
@@ -288,8 +285,6 @@ def get_events():
 
 def start_event(event_id):
 
-    require_admin()
-
     connection = get_connection()
 
     try:
@@ -317,6 +312,44 @@ def start_event(event_id):
 
         connection.close()
 
+
+
+
+def revert_event_to_draft(event_id):
+    """
+    Return a LIVE event to DRAFT so an administrator can correct
+    event setup before scoring resumes. Existing hole scores remain.
+    """
+    require_admin()
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE events
+                SET status = 'DRAFT',
+                    closed_at = NULL
+                WHERE id = %s
+                AND status = 'LIVE'
+                """,
+                (int(event_id),)
+            )
+
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "Only a LIVE event can be returned to DRAFT."
+                )
+
+        connection.commit()
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
 
 
 def get_event(event_id):
@@ -385,8 +418,6 @@ def update_event(
     event_format,
     event_players
 ):
-
-    require_admin()
     """
     Update a DRAFT event.
 
@@ -526,8 +557,6 @@ def update_event(
 
 def delete_event(event_id):
 
-    require_admin()
-
     """
     Permanently delete an event and all information
     belonging to that event.
@@ -634,10 +663,99 @@ def delete_event(event_id):
 
 
 # ============================================================
-# ADMIN ACCESS
+# ADMIN MODE
 # ============================================================
 
-admin_mode = is_admin()
+def get_admin_password():
+    """
+    Read the admin password from Streamlit secrets first,
+    then from the Railway environment variable.
+    """
+    try:
+        password = st.secrets.get(
+            "GOLFING_WARRIORS_ADMIN_PASSWORD",
+            ""
+        )
+    except Exception:
+        password = ""
+
+    if password:
+        return password
+
+    return os.getenv(
+        "GOLFING_WARRIORS_ADMIN_PASSWORD",
+        ""
+    )
+
+
+def render_admin_mode():
+    """
+    Simple session-based admin login.
+
+    The password is never stored in this Python file.
+    """
+
+    st.sidebar.divider()
+    st.sidebar.subheader("🔐 Admin")
+
+    if st.session_state.get(
+        "golfing_warriors_admin",
+        False
+    ):
+
+        st.sidebar.success(
+            "🟢 Admin Mode Active"
+        )
+
+        if st.sidebar.button(
+            "🔓 Exit Admin Mode",
+            use_container_width=True
+        ):
+
+            st.session_state[
+                "golfing_warriors_admin"
+            ] = False
+
+            st.rerun()
+
+        return True
+
+    password = st.sidebar.text_input(
+        "Admin Password",
+        type="password",
+        key="golfing_warriors_admin_password"
+    )
+
+    if st.sidebar.button(
+        "🔐 Enter Admin Mode",
+        use_container_width=True
+    ):
+
+        configured_password = get_admin_password()
+
+        if (
+            configured_password
+            and password == configured_password
+        ):
+
+            st.session_state[
+                "golfing_warriors_admin"
+            ] = True
+
+            st.session_state.pop(
+                "golfing_warriors_admin_password",
+                None
+            )
+
+            st.rerun()
+
+        else:
+
+            st.sidebar.error(
+                "Incorrect admin password."
+            )
+
+    return False
 
 
 # ============================================================
@@ -650,7 +768,7 @@ st.caption(
     "Create and manage Golfing Warriors events."
 )
 
-
+is_admin = render_admin_mode()
 
 st.divider()
 
@@ -766,10 +884,23 @@ event_format = st.radio(
     "Competition Format",
     [
         "IPS",
-        "NET"
+        "NET",
+        "MATCH PLAY TEAMS",
+        "MATCH PLAY SINGLES"
     ],
     horizontal=True
 )
+
+if event_format == "MATCH PLAY TEAMS":
+    st.info(
+        "⚔️ Match Play Teams — betterball teams of two, "
+        "with both sides dropping to zero."
+    )
+elif event_format == "MATCH PLAY SINGLES":
+    st.info(
+        "⚔️ Match Play Singles — one player versus one player, "
+        "with both sides dropping to zero."
+    )
 
 
 # ============================================================
@@ -1123,9 +1254,7 @@ else:
 
     if st.button(
         "🏌️ Create Golfing Warriors Event",
-        type="primary",
-        disabled=not admin_mode,
-        help="Admin access is required to create events."
+        type="primary"
     ):
 
         try:
@@ -1247,9 +1376,7 @@ else:
                 if st.button(
                     "✏️ Edit Event",
                     key=f"edit_{event_id}",
-                    use_container_width=True,
-                    disabled=not admin_mode,
-                    help="Admin access is required to edit events."
+                    use_container_width=True
                 ):
                     st.session_state[
                         f"edit_event_{event_id}"
@@ -1264,9 +1391,7 @@ else:
                 if st.button(
                     "🟢 Start Event",
                     key=f"start_{event_id}",
-                    use_container_width=True,
-                    disabled=not admin_mode,
-                    help="Admin access is required to start events."
+                    use_container_width=True
                 ):
 
                     try:
@@ -1296,9 +1421,7 @@ else:
                 if st.button(
                     "🗑️ Delete Event",
                     key=f"delete_{event_id}",
-                    use_container_width=True,
-                    disabled=not admin_mode,
-                    help="Admin access is required to delete events."
+                    use_container_width=True
                 ):
 
                     st.session_state[
@@ -1309,7 +1432,7 @@ else:
             # EDIT FORM
             # ------------------------------------------------
 
-            if admin_mode and st.session_state.get(
+            if st.session_state.get(
                 f"edit_event_{event_id}",
                 False
             ):
@@ -1386,13 +1509,26 @@ else:
                         edit_course_label
                     ]
 
+                    format_options = [
+                        "IPS",
+                        "NET",
+                        "MATCH PLAY TEAMS",
+                        "MATCH PLAY SINGLES"
+                    ]
+
+                    current_format = str(
+                        current_event["format"]
+                    )
+
                     edit_format = st.radio(
                         "Competition Format",
-                        ["IPS", "NET"],
+                        format_options,
                         index=(
-                            0
-                            if str(current_event["format"]) == "IPS"
-                            else 1
+                            format_options.index(
+                                current_format
+                            )
+                            if current_format in format_options
+                            else 0
                         ),
                         horizontal=True,
                         key=f"edit_format_{event_id}"
@@ -1605,7 +1741,7 @@ else:
             # DELETE CONFIRMATION
             # ------------------------------------------------
 
-            if admin_mode and st.session_state.get(
+            if st.session_state.get(
                 f"confirm_delete_{event_id}",
                 False
             ):
@@ -1681,6 +1817,78 @@ else:
                 "Event setup is locked while scoring is active."
             )
 
+            if is_admin:
+                rollback_key = (
+                    f"confirm_revert_draft_{event_id}"
+                )
+
+                if not st.session_state.get(
+                    rollback_key,
+                    False
+                ):
+                    if st.button(
+                        "↩️ Return Event to DRAFT",
+                        key=f"revert_draft_{event_id}",
+                        use_container_width=True
+                    ):
+                        st.session_state[
+                            rollback_key
+                        ] = True
+                        st.rerun()
+
+                else:
+                    st.warning(
+                        "⚠️ Return this LIVE event to DRAFT?"
+                    )
+
+                    st.caption(
+                        "Existing hole scores will be preserved. "
+                        "The event will disappear from Live Scoring "
+                        "until you start it again."
+                    )
+
+                    yes_col, no_col = st.columns(2)
+
+                    with yes_col:
+                        if st.button(
+                            "YES — RETURN TO DRAFT",
+                            key=f"revert_yes_{event_id}",
+                            type="primary",
+                            use_container_width=True
+                        ):
+                            try:
+                                revert_event_to_draft(event_id)
+
+                                st.session_state.pop(
+                                    rollback_key,
+                                    None
+                                )
+
+                                st.success(
+                                    "Event returned to DRAFT. "
+                                    "You can now correct the setup."
+                                )
+
+                                st.rerun()
+
+                            except Exception as error:
+                                st.error(
+                                    "Unable to return event to DRAFT."
+                                )
+                                st.exception(error)
+
+                    with no_col:
+                        if st.button(
+                            "Cancel",
+                            key=f"revert_no_{event_id}",
+                            use_container_width=True
+                        ):
+                            st.session_state.pop(
+                                rollback_key,
+                                None
+                            )
+                            st.rerun()
+
         # ----------------------------------------------------
         # PENDING CLOSE
         # ----------------------------------------------------
@@ -1703,7 +1911,7 @@ else:
                 "Results are locked."
             )
 
-            if admin_mode:
+            if is_admin:
 
                 st.warning(
                     "🔐 Admin Mode: You can permanently "
@@ -1805,3 +2013,4 @@ else:
                 )
 
         st.divider()
+
