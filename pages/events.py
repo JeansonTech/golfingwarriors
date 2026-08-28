@@ -320,7 +320,7 @@ def revert_event_to_draft(event_id):
     Return a LIVE event to DRAFT so an administrator can correct
     event setup before scoring resumes. Existing hole scores remain.
     """
-    if not is_admin():
+    if not auth_is_admin():
         raise PermissionError("Admin access is required.")
 
     connection = get_connection()
