@@ -3,6 +3,7 @@ import pandas as pd
 import os
 
 from database import get_connection
+from auth import is_admin as auth_is_admin
 
 
 st.set_page_config(
