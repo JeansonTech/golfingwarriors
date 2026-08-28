@@ -187,7 +187,7 @@ st.markdown(
         .block-container {
             padding-left: 0.55rem;
             padding-right: 0.55rem;
-            padding-top: 2.2rem !important;
+            padding-top: 3.2rem !important;
         }
 
         h1 {
@@ -957,12 +957,12 @@ scorer_id = group_players[0]["player_id"]
 group_players = [
     player
     for player in players
-    if player["group_number"] == group_number
+    if player["group_number"] == selected_group
 ]
 
 
 st.caption(
-    f"👥 Fourball {group_number} • "
+    f"👥 Fourball {selected_group} • "
     "Any player in this fourball can enter the scores."
 )
 

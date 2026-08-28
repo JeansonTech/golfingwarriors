@@ -119,67 +119,10 @@ def get_course_holes(course_id):
 
 
 def ensure_match_play_tables():
-    """Create Match Play tables and make sure events can store MATCH PLAY."""
+    """Create Match Play tables if they do not already exist."""
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                DO $$
-                DECLARE
-                    constraint_name TEXT;
-                    constraint_def TEXT;
-                BEGIN
-                    FOR constraint_name, constraint_def IN
-                        SELECT c.conname, pg_get_constraintdef(c.oid)
-                        FROM pg_constraint c
-                        INNER JOIN pg_class t ON t.oid = c.conrelid
-                        WHERE t.relname = 'events'
-                          AND c.contype = 'c'
-                          AND pg_get_constraintdef(c.oid) ILIKE '%format%'
-                          AND (
-                              pg_get_constraintdef(c.oid) ILIKE '%IPS%'
-                              OR pg_get_constraintdef(c.oid) ILIKE '%NET%'
-                          )
-                    LOOP
-                        EXECUTE format(
-                            'ALTER TABLE events DROP CONSTRAINT %I',
-                            constraint_name
-                        );
-                    END LOOP;
-                END
-                $$;
-                """
-            )
-
-            cursor.execute(
-                """
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1
-                        FROM pg_constraint c
-                        INNER JOIN pg_class t ON t.oid = c.conrelid
-                        WHERE t.relname = 'events'
-                          AND c.conname = 'events_format_check'
-                    ) THEN
-                        ALTER TABLE events
-                        ADD CONSTRAINT events_format_check
-                        CHECK (
-                            format IN (
-                                'IPS',
-                                'NET',
-                                'MATCH PLAY',
-                                'MATCH PLAY TEAMS',
-                                'MATCH PLAY SINGLES'
-                            )
-                        );
-                    END IF;
-                END
-                $$;
-                """
-            )
-
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS match_play_matches (
@@ -196,7 +139,6 @@ def ensure_match_play_tables():
                 )
                 """
             )
-
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS match_play_sides (
@@ -209,7 +151,6 @@ def ensure_match_play_tables():
                 )
                 """
             )
-
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS match_play_side_players (
@@ -219,7 +160,6 @@ def ensure_match_play_tables():
                 )
                 """
             )
-
         connection.commit()
     except Exception:
         connection.rollback()
@@ -229,16 +169,39 @@ def ensure_match_play_tables():
 
 
 def save_match_play_setup(event_id, event_format, match_setup):
-    """Save Match Play matches for a DRAFT event.
-
-    The event has one format (MATCH PLAY), while each individual match can
-    be SINGLES or TEAMS. Players may appear in multiple different matches.
-    """
-    if event_format != "MATCH PLAY":
+    """Replace the Match Play configuration for a DRAFT event."""
+    if event_format not in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
         return
+
+    expected_per_side = 2 if event_format == "MATCH PLAY TEAMS" else 1
+    expected_players_per_match = expected_per_side * 2
 
     if not match_setup:
         raise ValueError("At least one valid Match Play match is required.")
+
+    seen_players = set()
+    for match in match_setup:
+        sides = match.get("sides", {})
+        if set(sides.keys()) != {1, 2}:
+            raise ValueError(f"Match {match.get('match_number')} must contain Side 1 and Side 2.")
+
+        all_match_players = []
+        for side_number in (1, 2):
+            side_players = list(sides[side_number])
+            if len(side_players) != expected_per_side:
+                raise ValueError(
+                    f"Match {match.get('match_number')} side {side_number} must have "
+                    f"exactly {expected_per_side} player(s)."
+                )
+            all_match_players.extend(int(pid) for pid in side_players)
+
+        if len(all_match_players) != expected_players_per_match:
+            raise ValueError(f"Match {match.get('match_number')} has an invalid player count.")
+
+        for player_id in all_match_players:
+            if player_id in seen_players:
+                raise ValueError("A player cannot appear in more than one Match Play match.")
+            seen_players.add(player_id)
 
     connection = get_connection()
     try:
@@ -248,14 +211,10 @@ def save_match_play_setup(event_id, event_format, match_setup):
                 (int(event_id),)
             )
             row = cursor.fetchone()
-
             if row is None:
                 raise ValueError("Event does not exist.")
-
             if row[0] != "DRAFT":
-                raise ValueError(
-                    "Match Play setup can only be changed while the event is DRAFT."
-                )
+                raise ValueError("Match Play setup can only be changed while the event is DRAFT.")
 
             cursor.execute(
                 """
@@ -265,72 +224,11 @@ def save_match_play_setup(event_id, event_format, match_setup):
                 """,
                 (int(event_id),)
             )
-
             event_player_ids = {int(row[0]) for row in cursor.fetchall()}
-
-            if not event_player_ids:
-                raise ValueError("At least one event player is required.")
-
-            assigned_players = set()
-
-            for match in match_setup:
-                match_number = int(match["match_number"])
-                match_type = str(match["match_type"]).upper()
-                sides = match.get("sides", {})
-
-                if match_type not in ("TEAMS", "SINGLES"):
-                    raise ValueError(
-                        f"Match {match_number} must be either SINGLES or TEAMS."
-                    )
-
-                if set(sides.keys()) != {1, 2}:
-                    raise ValueError(
-                        f"Match {match_number} must contain Side 1 and Side 2."
-                    )
-
-                expected_per_side = 2 if match_type == "TEAMS" else 1
-                all_match_players = []
-
-                for side_number in (1, 2):
-                    side_players = [
-                        int(pid) for pid in sides[side_number]
-                    ]
-
-                    if len(side_players) != expected_per_side:
-                        side_label = (
-                            "Team A" if side_number == 1 else "Team B"
-                        ) if match_type == "TEAMS" else (
-                            "Player A" if side_number == 1 else "Player B"
-                        )
-
-                        raise ValueError(
-                            f"Match {match_number} {side_label} must have "
-                            f"exactly {expected_per_side} player(s)."
-                        )
-
-                    all_match_players.extend(side_players)
-
-                if len(all_match_players) != len(set(all_match_players)):
-                    raise ValueError(
-                        f"Match {match_number} contains the same player "
-                        "more than once."
-                    )
-
-                unknown_players = set(all_match_players) - event_player_ids
-                if unknown_players:
-                    raise ValueError(
-                        f"Match {match_number} contains a player who is not "
-                        "listed as an event participant."
-                    )
-
-                # Reuse across DIFFERENT matches is intentional.
-                assigned_players.update(all_match_players)
-
-            missing_players = event_player_ids - assigned_players
-            if missing_players:
+            if seen_players != event_player_ids:
                 raise ValueError(
-                    "Every selected event player must appear in at least "
-                    "one Match Play match."
+                    "Every event player must be assigned to exactly one Match Play side, "
+                    "and no other player may be assigned."
                 )
 
             cursor.execute(
@@ -338,10 +236,9 @@ def save_match_play_setup(event_id, event_format, match_setup):
                 (int(event_id),)
             )
 
-            for match in match_setup:
-                match_number = int(match["match_number"])
-                match_type = str(match["match_type"]).upper()
+            match_type = "TEAMS" if event_format == "MATCH PLAY TEAMS" else "SINGLES"
 
+            for match in match_setup:
                 cursor.execute(
                     """
                     INSERT INTO match_play_matches
@@ -349,26 +246,15 @@ def save_match_play_setup(event_id, event_format, match_setup):
                     VALUES (%s, %s, %s)
                     RETURNING id
                     """,
-                    (
-                        int(event_id),
-                        match_number,
-                        match_type
-                    )
+                    (int(event_id), int(match["match_number"]), match_type)
                 )
-
                 match_id = int(cursor.fetchone()[0])
 
                 for side_number in (1, 2):
                     players = match["sides"][side_number]
-
-                    if match_type == "TEAMS":
-                        side_name = (
-                            "Team A" if side_number == 1 else "Team B"
-                        )
-                    else:
-                        side_name = (
-                            "Player A" if side_number == 1 else "Player B"
-                        )
+                    side_name = "Team A" if side_number == 1 else "Team B"
+                    if match_type == "SINGLES":
+                        side_name = "Player A" if side_number == 1 else "Player B"
 
                     cursor.execute(
                         """
@@ -377,13 +263,8 @@ def save_match_play_setup(event_id, event_format, match_setup):
                         VALUES (%s, %s, %s)
                         RETURNING id
                         """,
-                        (
-                            match_id,
-                            side_number,
-                            side_name
-                        )
+                        (match_id, side_number, side_name)
                     )
-
                     side_id = int(cursor.fetchone()[0])
 
                     for player_id in players:
@@ -393,10 +274,7 @@ def save_match_play_setup(event_id, event_format, match_setup):
                                 (side_id, player_id)
                             VALUES (%s, %s)
                             """,
-                            (
-                                side_id,
-                                int(player_id)
-                            )
+                            (side_id, int(player_id))
                         )
 
         connection.commit()
@@ -1252,23 +1130,27 @@ selected_course = course_options[
 # ------------------------------------------------------------
 # FORMAT
 # ------------------------------------------------------------
-# FORMAT
-# ------------------------------------------------------------
 
 event_format = st.radio(
     "Competition Format",
     [
         "IPS",
         "NET",
-        "MATCH PLAY"
+        "MATCH PLAY TEAMS",
+        "MATCH PLAY SINGLES"
     ],
     horizontal=True
 )
 
-if event_format == "MATCH PLAY":
+if event_format == "MATCH PLAY TEAMS":
     st.info(
-        "⚔️ Match Play — each match can independently be Singles or "
-        "Teams / Betterball. A player may appear in multiple matches."
+        "⚔️ Match Play Teams — betterball teams of two, "
+        "with both sides dropping to zero."
+    )
+elif event_format == "MATCH PLAY SINGLES":
+    st.info(
+        "⚔️ Match Play Singles — one player versus one player, "
+        "with both sides dropping to zero."
     )
 
 
@@ -1362,147 +1244,99 @@ if not selected_players:
 
     st.info("Select the players who will participate.")
 
-elif event_format == "MATCH PLAY":
+elif event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
 
-    st.caption(
-        "Set the number of matches. For every match choose Singles or "
-        "Teams / Betterball and select the players. The same player can "
-        "play in multiple matches."
-    )
-
-    player_options = ["— Select player —"] + [
-        int(player["id"]) for player in selected_players
-    ]
-
-    selected_by_id = {
-        int(player["id"]): player
-        for player in selected_players
-    }
-
-    def player_option_label(player_id):
-        if player_id == "— Select player —":
-            return player_id
-
-        player = selected_by_id[int(player_id)]
-        label = player["name"]
-
-        if pd.notna(player["nickname"]):
-            label += f" ({player['nickname']})"
-
-        label += f" — HCP {float(player['current_handicap']):g}"
-        return label
-
-    default_match_count = max(1, len(selected_players) // 2)
-
-    number_of_matches = st.number_input(
-        "Number of Match Play Matches",
-        min_value=1,
-        max_value=30,
-        value=default_match_count,
-        step=1,
-        key="new_match_play_match_count"
-    )
-
-    for match_number in range(1, int(number_of_matches) + 1):
-
-        st.markdown(f"### ⚔️ Match {match_number}")
-
-        match_type = st.radio(
-            "Match Type",
-            ["SINGLES", "TEAMS"],
-            horizontal=True,
-            format_func=lambda x: (
-                "👤 Singles"
-                if x == "SINGLES"
-                else "👥 Teams / Betterball"
-            ),
-            key=f"new_mp_type_{match_number}"
+    if event_format == "MATCH PLAY TEAMS":
+        st.caption(
+            "Create two-player teams. Each match has exactly two teams "
+            "and four different players."
         )
+        if len(selected_players) % 4 != 0:
+            setup_errors.append(
+                "Match Play Teams requires the number of selected players "
+                "to be a multiple of 4."
+            )
+        max_matches = max(1, len(selected_players) // 4)
+        side_labels = {1: "Team A", 2: "Team B"}
+    else:
+        st.caption(
+            "Create one-player sides. Each match has exactly two players."
+        )
+        if len(selected_players) % 2 != 0:
+            setup_errors.append(
+                "Match Play Singles requires an even number of selected players."
+            )
+        max_matches = max(1, len(selected_players) // 2)
+        side_labels = {1: "Player A", 2: "Player B"}
 
-        if match_type == "SINGLES":
-            slots_per_side = 1
-            side_labels = {1: "Player A", 2: "Player B"}
+    assignments = []
+
+    for index, player in enumerate(selected_players):
+        default_match = (index // (4 if event_format == "MATCH PLAY TEAMS" else 2)) + 1
+        if event_format == "MATCH PLAY TEAMS":
+            default_side = 1 if (index % 4) < 2 else 2
         else:
-            slots_per_side = 2
-            side_labels = {1: "Team A", 2: "Team B"}
+            default_side = 1 if (index % 2) == 0 else 2
 
-        sides = {1: [], 2: []}
-        match_player_ids = []
+        c1, c2 = st.columns([2, 2])
+        with c1:
+            match_number = st.selectbox(
+                f"Match — {player['name']}",
+                list(range(1, max_matches + 1)),
+                index=min(default_match, max_matches) - 1,
+                key=f"mp_match_{event_format}_{player['id']}"
+            )
+        with c2:
+            side_number = st.selectbox(
+                f"Side — {player['name']}",
+                [1, 2],
+                index=default_side - 1,
+                format_func=lambda x: side_labels[x],
+                key=f"mp_side_{event_format}_{player['id']}"
+            )
 
+        assignments.append({
+            "player_id": int(player["id"]),
+            "name": player["name"],
+            "match_number": int(match_number),
+            "side_number": int(side_number)
+        })
+
+    match_map = {}
+    for assignment in assignments:
+        match_map.setdefault(assignment["match_number"], {1: [], 2: []})
+        match_map[assignment["match_number"]][assignment["side_number"]].append(assignment)
+
+    expected_per_side = 2 if event_format == "MATCH PLAY TEAMS" else 1
+
+    for match_number in range(1, max_matches + 1):
+        sides = match_map.get(match_number, {1: [], 2: []})
         for side_number in (1, 2):
-
-            st.write(f"**{side_labels[side_number]}**")
-
-            for slot in range(slots_per_side):
-
-                selected_player_id = st.selectbox(
-                    f"{side_labels[side_number]} — Player {slot + 1}",
-                    player_options,
-                    format_func=player_option_label,
-                    key=(
-                        f"new_mp_player_{match_number}_"
-                        f"{side_number}_{slot}"
-                    )
+            count = len(sides[side_number])
+            if count != expected_per_side:
+                setup_errors.append(
+                    f"Match {match_number} {side_labels[side_number]} must have "
+                    f"exactly {expected_per_side} player(s); currently has {count}."
                 )
 
-                if selected_player_id != "— Select player —":
-                    selected_player_id = int(selected_player_id)
-                    sides[side_number].append(selected_player_id)
-                    match_player_ids.append(selected_player_id)
-
-        if len(match_player_ids) != len(set(match_player_ids)):
+        all_ids = [p["player_id"] for side in sides.values() for p in side]
+        if len(all_ids) != len(set(all_ids)):
             setup_errors.append(
-                f"Match {match_number} contains the same player more than once."
+                f"Match {match_number} contains a duplicate player."
             )
 
-        if any(
-            len(sides[side]) != slots_per_side
-            for side in (1, 2)
-        ):
-            setup_errors.append(
-                f"Match {match_number} must have {slots_per_side} "
-                "player(s) on each side."
-            )
-
-        if (
-            all(
-                len(sides[side]) == slots_per_side
-                for side in (1, 2)
-            )
-            and len(match_player_ids) == len(set(match_player_ids))
-        ):
+        if all(len(sides[side]) == expected_per_side for side in (1, 2)):
             match_play_setup.append({
                 "match_number": match_number,
-                "match_type": match_type,
-                "sides": sides
+                "sides": {
+                    1: [p["player_id"] for p in sides[1]],
+                    2: [p["player_id"] for p in sides[2]]
+                }
             })
 
-    used_player_ids = {
-        pid
-        for match in match_play_setup
-        for side_players in match["sides"].values()
-        for pid in side_players
-    }
-
-    selected_player_ids = {
-        int(player["id"])
-        for player in selected_players
-    }
-
-    missing_player_ids = selected_player_ids - used_player_ids
-
-    if missing_player_ids:
-        missing_names = [
-            player["name"]
-            for player in selected_players
-            if int(player["id"]) in missing_player_ids
-        ]
-
-        setup_errors.append(
-            "These selected players are not currently assigned to a match: "
-            + ", ".join(missing_names)
-            + "."
-        )
+    assigned_ids = [a["player_id"] for a in assignments]
+    if len(assigned_ids) != len(set(assigned_ids)):
+        setup_errors.append("A player cannot appear in more than one Match Play side.")
 
 else:
 
@@ -1548,6 +1382,8 @@ else:
     match_play_setup = []
 
 
+st.divider()
+
 
 # ============================================================
 # EVENT HANDICAPS
@@ -1560,7 +1396,7 @@ st.caption(
     "without changing the player's normal handicap."
 )
 
-if event_format == "MATCH PLAY":
+if event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
     event_players = [
         {
             "player_id": int(player["id"]),
@@ -1641,7 +1477,9 @@ with summary_col1:
     st.metric("Players", len(final_event_players))
 
 with summary_col2:
-    if event_format == "MATCH PLAY":
+    if event_format == "MATCH PLAY TEAMS":
+        st.metric("Matches", len(match_play_setup))
+    elif event_format == "MATCH PLAY SINGLES":
         st.metric("Matches", len(match_play_setup))
     else:
         st.metric("Fourballs", len(groups))
@@ -1654,58 +1492,30 @@ with summary_col3:
 # SHOW FOURBALL / MATCH PLAY SUMMARY
 # ============================================================
 
-if event_format == "MATCH PLAY":
+if event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
 
     with st.expander("⚔️ Review Match Play Pairings", expanded=True):
-
         if not match_play_setup:
-            st.warning(
-                "No valid Match Play pairings have been configured yet."
-            )
-
+            st.warning("No valid Match Play pairings have been configured yet.")
         else:
             selected_by_id = {
                 int(player["id"]): player["name"]
                 for player in selected_players
             }
-
             for match in match_play_setup:
-
-                match_type_label = (
-                    "👤 Singles"
-                    if match["match_type"] == "SINGLES"
-                    else "👥 Teams / Betterball"
-                )
-
                 side_a = " / ".join(
-                    selected_by_id[pid]
-                    for pid in match["sides"][1]
+                    selected_by_id[pid] for pid in match["sides"][1]
                 )
-
                 side_b = " / ".join(
-                    selected_by_id[pid]
-                    for pid in match["sides"][2]
+                    selected_by_id[pid] for pid in match["sides"][2]
                 )
-
-                label_a = (
-                    "Player A"
-                    if match["match_type"] == "SINGLES"
-                    else "Team A"
-                )
-
-                label_b = (
-                    "Player B"
-                    if match["match_type"] == "SINGLES"
-                    else "Team B"
-                )
-
+                label_a = "Team A" if event_format == "MATCH PLAY TEAMS" else "Player A"
+                label_b = "Team B" if event_format == "MATCH PLAY TEAMS" else "Player B"
                 st.markdown(
-                    f"### Match {match['match_number']} — {match_type_label}"
+                    f"### Match {match['match_number']}"
                 )
-
                 st.write(f"**{label_a}:** {side_a}")
                 st.write(f"**{label_b}:** {side_b}")
-
 
 else:
 
@@ -1765,7 +1575,7 @@ else:
                 final_event_players
             )
 
-            if event_format == "MATCH PLAY":
+            if event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
                 save_match_play_setup(
                     event_id,
                     event_format,
@@ -1846,7 +1656,7 @@ else:
         with col4:
             st.write(status)
 
-        if event["format"] in ("MATCH PLAY", "MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
+        if event["format"] in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
             match_rows = get_match_play_matches(event_id)
             if not match_rows.empty:
                 with st.expander("⚔️ Match Play Pairings", expanded=False):
@@ -2014,26 +1824,21 @@ else:
                     format_options = [
                         "IPS",
                         "NET",
-                        "MATCH PLAY"
+                        "MATCH PLAY TEAMS",
+                        "MATCH PLAY SINGLES"
                     ]
 
                     current_format = str(
                         current_event["format"]
                     )
 
-                    # Convert legacy events to the new single Match Play
-                    # format when they are edited.
-                    if current_format in (
-                        "MATCH PLAY TEAMS",
-                        "MATCH PLAY SINGLES"
-                    ):
-                        current_format = "MATCH PLAY"
-
                     edit_format = st.radio(
                         "Competition Format",
                         format_options,
                         index=(
-                            format_options.index(current_format)
+                            format_options.index(
+                                current_format
+                            )
                             if current_format in format_options
                             else 0
                         ),
@@ -2042,8 +1847,7 @@ else:
                     )
 
                     st.caption(
-                        "Player handicaps below are the event snapshots. "
-                        "Changing them here does not change the player's normal handicap."
+                        "Player handicaps below are the event snapshots. Changing them here does not change the player's normal handicap."
                     )
 
                     # --------------------------------------------
@@ -2054,252 +1858,107 @@ else:
                     edit_match_play_setup = []
                     edit_errors = []
 
-                    if edit_format == "MATCH PLAY":
+                    if edit_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
 
                         current_match_df = get_match_play_setup(event_id)
-
-                        current_ids = [
-                            int(x)
-                            for x in current_players_df["player_id"].tolist()
-                        ]
-
+                        current_ids = [int(x) for x in current_players_df["player_id"].tolist()]
                         current_names = {
                             int(row["player_id"]): row["name"]
                             for _, row in current_players_df.iterrows()
                         }
 
-                        current_hcps = {
-                            int(row["player_id"]): float(row["event_handicap"])
-                            for _, row in current_players_df.iterrows()
-                        }
-
                         st.subheader("⚔️ Match Play Setup")
 
-                        st.caption(
-                            "Each match can be Singles or Teams / Betterball. "
-                            "A player may appear in multiple matches, but not "
-                            "twice in the same match."
-                        )
+                        if edit_format == "MATCH PLAY TEAMS":
+                            expected_per_side = 2
+                            match_size = 4
+                            side_labels_edit = {1: "Team A", 2: "Team B"}
+                        else:
+                            expected_per_side = 1
+                            match_size = 2
+                            side_labels_edit = {1: "Player A", 2: "Player B"}
 
-                        existing_matches = {}
+                        max_matches_edit = max(1, len(current_ids) // match_size)
+                        edit_assignments = []
 
-                        if not current_match_df.empty:
-                            for match_number in sorted(
-                                current_match_df["match_number"]
-                                .astype(int)
-                                .unique()
-                                .tolist()
-                            ):
-
-                                rows = current_match_df[
-                                    current_match_df["match_number"]
-                                    == match_number
-                                ]
-
-                                existing_type = str(
-                                    rows.iloc[0]["match_type"]
-                                ).upper()
-
-                                sides = {1: [], 2: []}
-
-                                for _, row in rows.iterrows():
-                                    sides[int(row["side_number"])].append(
-                                        int(row["player_id"])
-                                    )
-
-                                existing_matches[match_number] = {
-                                    "match_type": existing_type,
-                                    "sides": sides
-                                }
-
-                        default_match_count = max(
-                            1,
-                            len(existing_matches)
-                        )
-
-                        number_of_matches_edit = st.number_input(
-                            "Number of Match Play Matches",
-                            min_value=1,
-                            max_value=30,
-                            value=default_match_count,
-                            step=1,
-                            key=f"edit_mp_match_count_{event_id}"
-                        )
-
-                        edit_player_options = [
-                            "— Select player —"
-                        ] + current_ids
-
-                        def edit_player_label(player_id):
-                            if player_id == "— Select player —":
-                                return player_id
-                            return current_names[int(player_id)]
-
-                        for match_number in range(
-                            1,
-                            int(number_of_matches_edit) + 1
-                        ):
-
-                            existing = existing_matches.get(
-                                match_number,
-                                {
-                                    "match_type": "SINGLES",
-                                    "sides": {1: [], 2: []}
-                                }
-                            )
-
-                            type_key = (
-                                f"edit_mp_type_"
-                                f"{event_id}_{match_number}"
-                            )
-
-                            if type_key not in st.session_state:
-                                st.session_state[type_key] = (
-                                    existing["match_type"]
-                                    if existing["match_type"]
-                                    in ("SINGLES", "TEAMS")
-                                    else "SINGLES"
-                                )
-
-                            match_type = st.radio(
-                                f"Match {match_number} Type",
-                                ["SINGLES", "TEAMS"],
-                                horizontal=True,
-                                format_func=lambda x: (
-                                    "👤 Singles"
-                                    if x == "SINGLES"
-                                    else "👥 Teams / Betterball"
-                                ),
-                                key=type_key
-                            )
-
-                            if match_type == "SINGLES":
-                                slots_per_side = 1
-                                side_labels = {
-                                    1: "Player A",
-                                    2: "Player B"
-                                }
-                            else:
-                                slots_per_side = 2
-                                side_labels = {
-                                    1: "Team A",
-                                    2: "Team B"
-                                }
-
-                            sides = {1: [], 2: []}
-                            match_player_ids = []
-
-                            for side_number in (1, 2):
-
-                                st.write(
-                                    f"**{side_labels[side_number]}**"
-                                )
-
-                                existing_side = existing["sides"].get(
-                                    side_number,
-                                    []
-                                )
-
-                                for slot in range(slots_per_side):
-
-                                    slot_key = (
-                                        f"edit_mp_player_{event_id}_"
-                                        f"{match_number}_{side_number}_{slot}"
-                                    )
-
-                                    if slot_key not in st.session_state:
-                                        st.session_state[slot_key] = (
-                                            existing_side[slot]
-                                            if slot < len(existing_side)
-                                            else "— Select player —"
-                                        )
-
-                                    selected_player_id = st.selectbox(
-                                        f"{side_labels[side_number]} "
-                                        f"— Player {slot + 1}",
-                                        edit_player_options,
-                                        format_func=edit_player_label,
-                                        key=slot_key
-                                    )
-
-                                    if selected_player_id != "— Select player —":
-                                        selected_player_id = int(
-                                            selected_player_id
-                                        )
-                                        sides[side_number].append(
-                                            selected_player_id
-                                        )
-                                        match_player_ids.append(
-                                            selected_player_id
-                                        )
-
-                            if len(match_player_ids) != len(
-                                set(match_player_ids)
-                            ):
-                                edit_errors.append(
-                                    f"Match {match_number} contains the same "
-                                    "player more than once."
-                                )
-
-                            if any(
-                                len(sides[side]) != slots_per_side
-                                for side in (1, 2)
-                            ):
-                                edit_errors.append(
-                                    f"Match {match_number} must have "
-                                    f"{slots_per_side} player(s) on each side."
-                                )
-
-                            if (
-                                all(
-                                    len(sides[side]) == slots_per_side
-                                    for side in (1, 2)
-                                )
-                                and len(match_player_ids)
-                                == len(set(match_player_ids))
-                            ):
-                                edit_match_play_setup.append({
-                                    "match_number": match_number,
-                                    "match_type": match_type,
-                                    "sides": sides
-                                })
-
-                        used_ids = {
-                            pid
-                            for match in edit_match_play_setup
-                            for side_players in match["sides"].values()
-                            for pid in side_players
-                        }
-
-                        missing_ids = set(current_ids) - used_ids
-
-                        if missing_ids:
-                            missing_names = [
-                                current_names[pid]
-                                for pid in current_ids
-                                if pid in missing_ids
+                        for index, player_id in enumerate(current_ids):
+                            current_rows = current_match_df[
+                                current_match_df["player_id"] == player_id
                             ]
+                            if not current_rows.empty:
+                                current_match = int(current_rows.iloc[0]["match_number"])
+                                current_side = int(current_rows.iloc[0]["side_number"])
+                            else:
+                                current_match = min((index // match_size) + 1, max_matches_edit)
+                                current_side = 1 if (index % match_size) < expected_per_side else 2
 
-                            edit_errors.append(
-                                "These event players are not currently "
-                                "assigned to a match: "
-                                + ", ".join(missing_names)
-                                + "."
+                            ec1, ec2 = st.columns([2, 2])
+                            with ec1:
+                                selected_match = st.selectbox(
+                                    f"Match — {current_names[player_id]}",
+                                    list(range(1, max_matches_edit + 1)),
+                                    index=min(current_match, max_matches_edit) - 1,
+                                    key=f"edit_mp_match_{event_id}_{player_id}"
+                                )
+                            with ec2:
+                                selected_side = st.selectbox(
+                                    f"Side — {current_names[player_id]}",
+                                    [1, 2],
+                                    index=current_side - 1,
+                                    format_func=lambda x: side_labels_edit[x],
+                                    key=f"edit_mp_side_{event_id}_{player_id}"
+                                )
+
+                            edit_assignments.append({
+                                "player_id": player_id,
+                                "match_number": int(selected_match),
+                                "side_number": int(selected_side)
+                            })
+
+                            edit_handicap = st.number_input(
+                                f"Handicap — {current_names[player_id]}",
+                                min_value=-10.0,
+                                max_value=64.0,
+                                value=float(current_players_df.loc[
+                                    current_players_df["player_id"] == player_id,
+                                    "event_handicap"
+                                ].iloc[0]),
+                                step=0.1,
+                                key=f"edit_hcp_{event_id}_{player_id}"
                             )
 
-                        for player_id in current_ids:
                             edit_event_players.append({
                                 "player_id": player_id,
                                 "name": current_names[player_id],
-                                "handicap": current_hcps[player_id],
+                                "handicap": float(edit_handicap),
                                 "group_number": 0,
                                 "is_scorer": False
                             })
 
+                        edit_match_map = {}
+                        for assignment in edit_assignments:
+                            edit_match_map.setdefault(assignment["match_number"], {1: [], 2: []})
+                            edit_match_map[assignment["match_number"]][assignment["side_number"]].append(assignment["player_id"])
+
+                        for match_number in range(1, max_matches_edit + 1):
+                            sides = edit_match_map.get(match_number, {1: [], 2: []})
+                            for side_number in (1, 2):
+                                if len(sides[side_number]) != expected_per_side:
+                                    edit_errors.append(
+                                        f"Match {match_number} {side_labels_edit[side_number]} must have exactly {expected_per_side} player(s)."
+                                    )
+                            if all(len(sides[side]) == expected_per_side for side in (1, 2)):
+                                edit_match_play_setup.append({
+                                    "match_number": match_number,
+                                    "sides": {
+                                        1: sides[1],
+                                        2: sides[2]
+                                    }
+                                })
+
                     else:
 
                         for player_index, player in current_players_df.iterrows():
-
                             player_id = int(player["player_id"])
 
                             pcol1, pcol2, pcol3 = st.columns([3, 1, 2])
@@ -2312,10 +1971,7 @@ else:
                                     "Group",
                                     min_value=1,
                                     max_value=50,
-                                    value=max(
-                                        1,
-                                        int(player["group_number"])
-                                    ),
+                                    value=max(1, int(player["group_number"])),
                                     step=1,
                                     key=f"edit_group_{event_id}_{player_id}"
                                 )
@@ -2345,26 +2001,15 @@ else:
                             })
 
                         edit_groups = {}
-
                         for player in edit_event_players:
-                            edit_groups.setdefault(
-                                player["group_number"],
-                                []
-                            ).append(player)
+                            edit_groups.setdefault(player["group_number"], []).append(player)
 
                         for group_number, group_players in edit_groups.items():
-
-                            scorer_count = sum(
-                                1
-                                for player in group_players
-                                if player["is_scorer"]
-                            )
-
+                            scorer_count = sum(1 for player in group_players if player["is_scorer"])
                             if scorer_count != 1:
                                 edit_errors.append(
                                     f"Fourball {group_number} must have exactly ONE scorer."
                                 )
-
                             if len(group_players) > 4:
                                 edit_errors.append(
                                     f"Fourball {group_number} has more than four players."
@@ -2405,7 +2050,7 @@ else:
                                     edit_event_players
                                 )
 
-                                if edit_format == "MATCH PLAY":
+                                if edit_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
                                     save_match_play_setup(
                                         event_id,
                                         edit_format,
