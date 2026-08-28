@@ -187,7 +187,7 @@ st.markdown(
         .block-container {
             padding-left: 0.55rem;
             padding-right: 0.55rem;
-            padding-top: 3.2rem !important;
+            padding-top: 0.45rem;
         }
 
         h1 {
@@ -1472,8 +1472,8 @@ for result in round_results:
             "Player":
                 result["name"],
 
-            "Holes":
-                f"{result['completed']}/18",
+            "Thru":
+                result["completed"],
 
             "Net":
                 result["net_total"],
@@ -1548,76 +1548,156 @@ st.header(
 )
 
 
-if event_format == "IPS":
-
-    sorted_results = sorted(
-        round_results,
-        key=lambda result: (
-            -result["ips_total"],
-            -result["completed"],
-            result["name"]
-        )
-    )
-
-    score_column = "IPS"
-
-
-else:
-
-    sorted_results = sorted(
-        round_results,
-        key=lambda result: (
-            result["net_total"],
-            -result["completed"],
-            result["name"]
-        )
-    )
-
-    score_column = "Net"
-
-
-leaderboard_rows = []
-
-
-for position, result in enumerate(
-    sorted_results,
-    start=1
+def build_player_leaderboard(
+    score_type
 ):
+    """Build a live leaderboard for IPS or Net scoring."""
 
-    leaderboard_rows.append(
-        {
-            "Pos":
-                position,
+    if score_type == "IPS":
 
-            "Player":
-                result["name"],
+        sorted_results = sorted(
+            round_results,
+            key=lambda result: (
+                -result["ips_total"],
+                -result["completed"],
+                result["name"]
+            )
+        )
 
-            "HCP":
-                result["handicap"],
+    else:
 
-            "Holes":
-                f"{result['completed']}/18",
+        sorted_results = sorted(
+            round_results,
+            key=lambda result: (
+                result["net_total"],
+                -result["completed"],
+                result["name"]
+            )
+        )
 
-            score_column:
-                (
-                    result["ips_total"]
-                    if event_format == "IPS"
-                    else result["net_total"]
+
+    rows = []
+
+    for position, result in enumerate(
+        sorted_results,
+        start=1
+    ):
+
+        rows.append(
+            {
+                "Pos":
+                    position,
+
+                "Player":
+                    result["name"],
+
+                "HCP":
+                    result["handicap"],
+
+                "Thru":
+                    result["completed"],
+
+                score_type:
+                    (
+                        result["ips_total"]
+                        if score_type == "IPS"
+                        else result["net_total"]
+                    )
+            }
+        )
+
+
+    return pd.DataFrame(rows)
+
+
+# ------------------------------------------------------------
+# TABS
+# ------------------------------------------------------------
+
+tab_ips, tab_net, tab_match_teams, tab_match_singles = (
+    st.tabs(
+        [
+            "🏆 IPS",
+            "🏆 NET",
+            "⚔️ Teams",
+            "⚔️ Singles"
+        ]
+    )
+)
+
+
+with tab_ips:
+
+    ips_df = build_player_leaderboard(
+        "IPS"
+    )
+
+    st.dataframe(
+        ips_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Thru":
+                st.column_config.NumberColumn(
+                    "Thru",
+                    format="%d"
                 )
         }
     )
 
 
-leaderboard_df = pd.DataFrame(
-    leaderboard_rows
-)
+with tab_net:
+
+    net_df = build_player_leaderboard(
+        "Net"
+    )
+
+    st.dataframe(
+        net_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Thru":
+                st.column_config.NumberColumn(
+                    "Thru",
+                    format="%d"
+                )
+        }
+    )
 
 
-st.dataframe(
-    leaderboard_df,
-    use_container_width=True,
-    hide_index=True
-)
+with tab_match_teams:
+
+    st.subheader(
+        "⚔️ Match Play Teams"
+    )
+
+    st.info(
+        "No Match Play team matches are configured "
+        "for this event yet."
+    )
+
+    st.caption(
+        "When Match Play – Drop to Zero is added to "
+        "event setup, team matches will appear here."
+    )
+
+
+with tab_match_singles:
+
+    st.subheader(
+        "⚔️ Match Play Singles"
+    )
+
+    st.info(
+        "No Match Play singles matches are configured "
+        "for this event yet."
+    )
+
+    st.caption(
+        "When Match Play – Drop to Zero is added to "
+        "event setup, individual matches will appear here."
+    )
 
 
 # ============================================================
