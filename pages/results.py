@@ -42,7 +42,7 @@ st.markdown(
         .block-container {
             padding-left: 0.55rem;
             padding-right: 0.55rem;
-        }
+            padding-top: 3.2rem !important;        }
 
         h1 {
             font-size: 1.65rem !important;

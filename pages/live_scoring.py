@@ -187,7 +187,7 @@ st.markdown(
         .block-container {
             padding-left: 0.55rem;
             padding-right: 0.55rem;
-            padding-top: 0.45rem;
+            padding-top: 3.2rem !important;
         }
 
         h1 {
