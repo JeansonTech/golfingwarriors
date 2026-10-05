@@ -10,7 +10,7 @@ from auth import render_app_sidebar
 
 st.set_page_config(
     page_title="Golfing Warriors",
-    page_icon="🏌️",
+    page_icon=str(Path(__file__).resolve().parent / "assets" / "golfing-warriors-icon.png"),
     layout="wide",
     initial_sidebar_state="auto",
 )

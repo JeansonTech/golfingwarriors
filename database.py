@@ -150,6 +150,41 @@ def init_database():
             """)
 
             # =====================================================
+            # EVENT COMPETITIONS
+            # =====================================================
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS event_competitions (
+                    event_id INTEGER NOT NULL
+                        REFERENCES events(id) ON DELETE CASCADE,
+                    competition_code VARCHAR(30) NOT NULL,
+                    PRIMARY KEY (event_id, competition_code)
+                );
+            """)
+
+            # Existing events retain the IPS and NET scoreboards they had before
+            # this setting existed, with the stored format remaining primary.
+            cursor.execute("""
+                INSERT INTO event_competitions (event_id, competition_code)
+                SELECT events.id, formats.competition_code
+                FROM events
+                CROSS JOIN (VALUES ('IPS'), ('NET')) AS formats(competition_code)
+                ON CONFLICT DO NOTHING;
+            """)
+
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF to_regclass('match_play_matches') IS NOT NULL THEN
+                        INSERT INTO event_competitions (event_id, competition_code)
+                        SELECT DISTINCT event_id, 'MATCH_PLAY'
+                        FROM match_play_matches
+                        ON CONFLICT DO NOTHING;
+                    END IF;
+                END $$;
+            """)
+
+            # =====================================================
             # EVENT HOLES
             # =====================================================
 

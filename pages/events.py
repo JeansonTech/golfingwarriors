@@ -1,4 +1,5 @@
 import streamlit as st
+from pathlib import Path
 import pandas as pd
 import os
 
@@ -8,7 +9,7 @@ from auth import is_admin as auth_is_admin
 
 st.set_page_config(
     page_title="Golfing Warriors - Events",
-    page_icon="🏌️",
+    page_icon=str(Path(__file__).resolve().parent.parent / "assets" / "golfing-warriors-icon.png"),
     layout="wide"
 )
 
@@ -358,12 +359,42 @@ def get_match_play_matches(event_id):
         connection.close()
 
 
+def get_event_competitions(event_id):
+    """Return the selected leaderboard formats for an event."""
+    connection = get_connection()
+    try:
+        rows = pd.read_sql_query(
+            "SELECT competition_code FROM event_competitions WHERE event_id = %s",
+            connection,
+            params=(int(event_id),)
+        )
+        return set(rows["competition_code"].astype(str))
+    finally:
+        connection.close()
+
+
+def save_event_competitions(cursor, event_id, main_format, side_games):
+    """Persist the main format and selected side games using an open cursor."""
+    if main_format not in ("IPS", "NET"):
+        raise ValueError("The main competition must be IPS or NET.")
+    selected = {main_format, *side_games}
+    cursor.execute(
+        "DELETE FROM event_competitions WHERE event_id = %s",
+        (int(event_id),)
+    )
+    cursor.executemany(
+        "INSERT INTO event_competitions (event_id, competition_code) VALUES (%s, %s)",
+        [(int(event_id), competition) for competition in sorted(selected)]
+    )
+
+
 def create_event(
     season_id,
     course_id,
     name,
     event_date,
-    event_format
+    event_format,
+    side_games=None
 ):
 
     connection = get_connection()
@@ -400,6 +431,8 @@ def create_event(
             )
 
             event_id = cursor.fetchone()[0]
+
+            save_event_competitions(cursor, event_id, event_format, side_games or [])
 
             # -------------------------------------------------
             # COPY COURSE HOLES INTO EVENT
@@ -682,7 +715,8 @@ def update_event(
     name,
     event_date,
     event_format,
-    event_players
+    event_players,
+    side_games=None
 ):
     """
     Update a DRAFT event.
@@ -741,6 +775,8 @@ def update_event(
                     int(event_id)
                 )
             )
+
+            save_event_competitions(cursor, event_id, event_format, side_games or [])
 
             # -------------------------------------------------
             # Rebuild course-hole snapshot
@@ -1043,6 +1079,35 @@ except Exception as error:
     st.exception(error)
     st.stop()
 
+try:
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS event_competitions (
+                    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                    competition_code VARCHAR(30) NOT NULL,
+                    PRIMARY KEY (event_id, competition_code)
+                )
+            """)
+            cursor.execute("""
+                INSERT INTO event_competitions (event_id, competition_code)
+                SELECT id, CASE WHEN format = 'NET' THEN 'NET' ELSE 'IPS' END
+                FROM events ON CONFLICT DO NOTHING
+            """)
+            cursor.execute("""
+                INSERT INTO event_competitions (event_id, competition_code)
+                SELECT DISTINCT event_id, 'MATCH_PLAY'
+                FROM match_play_matches ON CONFLICT DO NOTHING
+            """)
+        connection.commit()
+    finally:
+        connection.close()
+except Exception as error:
+    st.error("Unable to initialise event competition storage.")
+    st.exception(error)
+    st.stop()
+
 
 # ============================================================
 # PAGE
@@ -1167,26 +1232,39 @@ selected_course = course_options[
 # ------------------------------------------------------------
 
 event_format = st.radio(
-    "Competition Format",
-    [
-        "IPS",
-        "NET",
-        "MATCH PLAY TEAMS",
-        "MATCH PLAY SINGLES"
-    ],
-    horizontal=True
+    "Main Competition Format — determines official ranking points",
+    ["IPS", "NET"],
+    horizontal=True,
+    key="new_event_main_format"
 )
 
-if event_format == "MATCH PLAY TEAMS":
-    st.info(
-        "⚔️ Match Play Teams — betterball teams of two, "
-        "with both sides dropping to zero."
+st.caption("Choose one or more additional leaderboards. Only the Main Competition awards ranking points.")
+side_game_options = [code for code in ("IPS", "NET") if code != event_format]
+side_games = []
+for code in side_game_options:
+    if st.checkbox(f"Add {code} as a side game", key=f"new_event_side_{code}"):
+        side_games.append(code)
+
+match_play_selected = st.checkbox(
+    "Add Match Play as a side game",
+    key="new_event_side_match_play"
+)
+if match_play_selected:
+    side_games.append("MATCH_PLAY")
+    match_play_format = st.radio(
+        "Match Play format",
+        ["MATCH PLAY TEAMS", "MATCH PLAY SINGLES"],
+        format_func=lambda value: "Teams of two" if value == "MATCH PLAY TEAMS" else "Singles",
+        horizontal=True,
+        key="new_event_match_play_format"
     )
-elif event_format == "MATCH PLAY SINGLES":
-    st.info(
-        "⚔️ Match Play Singles — one player versus one player, "
-        "with both sides dropping to zero."
-    )
+else:
+    match_play_format = None
+
+if match_play_format == "MATCH PLAY TEAMS":
+    st.info("⚔️ Match Play Teams — betterball teams of two, with both sides dropping to zero.")
+elif match_play_format == "MATCH PLAY SINGLES":
+    st.info("⚔️ Match Play Singles — one player versus one player, with both sides dropping to zero.")
 
 
 # ============================================================
@@ -1279,9 +1357,9 @@ if not selected_players:
 
     st.info("Select the players who will participate.")
 
-elif event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
+elif match_play_selected:
 
-    if event_format == "MATCH PLAY TEAMS":
+    if match_play_format == "MATCH PLAY TEAMS":
         st.caption(
             "Create two-player teams. Each match has exactly two teams "
             "and four different players."
@@ -1307,8 +1385,8 @@ elif event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
     assignments = []
 
     for index, player in enumerate(selected_players):
-        default_match = (index // (4 if event_format == "MATCH PLAY TEAMS" else 2)) + 1
-        if event_format == "MATCH PLAY TEAMS":
+        default_match = (index // (4 if match_play_format == "MATCH PLAY TEAMS" else 2)) + 1
+        if match_play_format == "MATCH PLAY TEAMS":
             default_side = 1 if (index % 4) < 2 else 2
         else:
             default_side = 1 if (index % 2) == 0 else 2
@@ -1319,7 +1397,7 @@ elif event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
                 f"Match — {player['name']}",
                 list(range(1, max_matches + 1)),
                 index=min(default_match, max_matches) - 1,
-                key=f"mp_match_{event_format}_{player['id']}"
+                key=f"mp_match_{match_play_format}_{player['id']}"
             )
         with c2:
             side_number = st.selectbox(
@@ -1327,7 +1405,7 @@ elif event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
                 [1, 2],
                 index=default_side - 1,
                 format_func=lambda x: side_labels[x],
-                key=f"mp_side_{event_format}_{player['id']}"
+                key=f"mp_side_{match_play_format}_{player['id']}"
             )
 
         assignments.append({
@@ -1342,7 +1420,7 @@ elif event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
         match_map.setdefault(assignment["match_number"], {1: [], 2: []})
         match_map[assignment["match_number"]][assignment["side_number"]].append(assignment)
 
-    expected_per_side = 2 if event_format == "MATCH PLAY TEAMS" else 1
+    expected_per_side = 2 if match_play_format == "MATCH PLAY TEAMS" else 1
 
     for match_number in range(1, max_matches + 1):
         sides = match_map.get(match_number, {1: [], 2: []})
@@ -1372,6 +1450,30 @@ elif event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
     assigned_ids = [a["player_id"] for a in assignments]
     if len(assigned_ids) != len(set(assigned_ids)):
         setup_errors.append("A player cannot appear in more than one Match Play side.")
+
+    st.caption("Set scoring fourballs as well. Each group can have up to four players and exactly one scorer.")
+    for index, player in enumerate(selected_players):
+        col1, col2, col3 = st.columns([3, 1, 2])
+        with col1:
+            st.write(f"**{player['name']}**")
+        with col2:
+            group = st.number_input(
+                "Scoring group", min_value=1, max_value=50,
+                value=(index // 4) + 1, step=1,
+                key=f"group_{player['id']}"
+            )
+        with col3:
+            scorer = st.checkbox(
+                "Scorer", key=f"scorer_{player['id']}"
+            )
+        event_players.append({
+            "player_id": int(player["id"]),
+            "name": player["name"],
+            "handicap": float(player["current_handicap"]),
+            "group_number": int(group),
+            "is_scorer": bool(scorer),
+            "status": "ACTIVE"
+        })
 
 else:
 
@@ -1431,18 +1533,6 @@ st.caption(
     "These handicaps are stored specifically for this event and can be changed "
     "without changing the player's normal handicap."
 )
-
-if event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
-    event_players = [
-        {
-            "player_id": int(player["id"]),
-            "name": player["name"],
-            "handicap": float(player["current_handicap"]),
-            "group_number": 0,
-            "is_scorer": False
-        }
-        for player in selected_players
-    ]
 
 final_event_players = []
 
@@ -1513,22 +1603,22 @@ with summary_col1:
     st.metric("Players", len(final_event_players))
 
 with summary_col2:
-    if event_format == "MATCH PLAY TEAMS":
-        st.metric("Matches", len(match_play_setup))
-    elif event_format == "MATCH PLAY SINGLES":
-        st.metric("Matches", len(match_play_setup))
+    if match_play_format == "MATCH PLAY TEAMS":
+        st.metric("Matches / Fourballs", f"{len(match_play_setup)} / {len(groups)}")
+    elif match_play_format == "MATCH PLAY SINGLES":
+        st.metric("Matches / Fourballs", f"{len(match_play_setup)} / {len(groups)}")
     else:
         st.metric("Fourballs", len(groups))
 
 with summary_col3:
-    st.metric("Format", event_format)
+    st.metric("Main Format", event_format)
 
 
 # ============================================================
 # SHOW FOURBALL / MATCH PLAY SUMMARY
 # ============================================================
 
-if event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
+if match_play_selected:
 
     with st.expander("⚔️ Review Match Play Pairings", expanded=True):
         if not match_play_setup:
@@ -1545,13 +1635,21 @@ if event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
                 side_b = " / ".join(
                     selected_by_id[pid] for pid in match["sides"][2]
                 )
-                label_a = "Team A" if event_format == "MATCH PLAY TEAMS" else "Player A"
-                label_b = "Team B" if event_format == "MATCH PLAY TEAMS" else "Player B"
+                label_a = "Team A" if match_play_format == "MATCH PLAY TEAMS" else "Player A"
+                label_b = "Team B" if match_play_format == "MATCH PLAY TEAMS" else "Player B"
                 st.markdown(
                     f"### Match {match['match_number']}"
                 )
                 st.write(f"**{label_a}:** {side_a}")
                 st.write(f"**{label_b}:** {side_b}")
+
+    with st.expander("👥 Review Scoring Fourballs", expanded=True):
+        for group_number in sorted(groups):
+            group_players = groups[group_number]
+            st.markdown(f"### Fourball {group_number}")
+            for player in group_players:
+                scorer_label = " 📝 **SCORER**" if player["is_scorer"] else ""
+                st.write(f"- {player['name']} — HCP {player['handicap']:g}{scorer_label}")
 
 else:
 
@@ -1603,7 +1701,8 @@ else:
                 selected_course["id"],
                 event_name,
                 event_date,
-                event_format
+                event_format,
+                side_games
             )
 
             add_event_players(
@@ -1611,10 +1710,10 @@ else:
                 final_event_players
             )
 
-            if event_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
+            if match_play_selected:
                 save_match_play_setup(
                     event_id,
-                    event_format,
+                    match_play_format,
                     match_play_setup
                 )
 
@@ -1685,14 +1784,23 @@ else:
             )
 
         with col3:
+            selected_competitions = get_event_competitions(event_id)
+            side_labels = [
+                code.replace("_", " ")
+                for code in ("IPS", "NET", "MATCH_PLAY")
+                if code in selected_competitions and code != event["format"]
+            ]
+            competition_text = str(event["format"])
+            if side_labels:
+                competition_text += " · Side games: " + ", ".join(side_labels)
             st.write(
-                f"🏆 {event['format']}"
+                f"🏆 {competition_text}"
             )
 
         with col4:
             st.write(status)
 
-        if event["format"] in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
+        if "MATCH_PLAY" in selected_competitions:
             match_rows = get_match_play_matches(event_id)
             if not match_rows.empty:
                 with st.expander("⚔️ Match Play Pairings", expanded=False):
@@ -1857,30 +1965,49 @@ else:
                         edit_course_label
                     ]
 
-                    format_options = [
-                        "IPS",
-                        "NET",
-                        "MATCH PLAY TEAMS",
-                        "MATCH PLAY SINGLES"
-                    ]
-
                     current_format = str(
                         current_event["format"]
                     )
 
                     edit_format = st.radio(
-                        "Competition Format",
-                        format_options,
-                        index=(
-                            format_options.index(
-                                current_format
-                            )
-                            if current_format in format_options
-                            else 0
-                        ),
+                        "Main Competition Format — determines official ranking points",
+                        ["IPS", "NET"],
+                        index=0 if current_format != "NET" else 1,
                         horizontal=True,
                         key=f"edit_format_{event_id}"
                     )
+
+                    current_competitions = get_event_competitions(event_id)
+                    other_format = "NET" if edit_format == "IPS" else "IPS"
+                    edit_side_games = []
+                    if st.checkbox(
+                        f"Add {other_format} as a side game",
+                        value=other_format in current_competitions,
+                        key=f"edit_side_{event_id}_{other_format}"
+                    ):
+                        edit_side_games.append(other_format)
+                    edit_match_play_selected = st.checkbox(
+                        "Add Match Play as a side game",
+                        value="MATCH_PLAY" in current_competitions,
+                        key=f"edit_side_{event_id}_match_play"
+                    )
+                    if edit_match_play_selected:
+                        edit_side_games.append("MATCH_PLAY")
+                        existing_match_rows = get_match_play_setup(event_id)
+                        current_match_type = (
+                            str(existing_match_rows.iloc[0]["match_type"])
+                            if not existing_match_rows.empty else "TEAMS"
+                        )
+                        edit_match_play_format = st.radio(
+                            "Match Play format",
+                            ["MATCH PLAY TEAMS", "MATCH PLAY SINGLES"],
+                            index=0 if current_match_type == "TEAMS" else 1,
+                            format_func=lambda value: "Teams of two" if value == "MATCH PLAY TEAMS" else "Singles",
+                            horizontal=True,
+                            key=f"edit_match_play_format_{event_id}"
+                        )
+                    else:
+                        edit_match_play_format = None
 
                     st.caption(
                         "Player handicaps below are the event snapshots. Changing them here does not change the player's normal handicap. A player can be marked Withdrawn / No-show without removing the player from the event or changing the fourball assignment."
@@ -1894,7 +2021,7 @@ else:
                     edit_match_play_setup = []
                     edit_errors = []
 
-                    if edit_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
+                    if edit_match_play_selected:
 
                         current_match_df = get_match_play_setup(event_id)
                         current_ids = [int(x) for x in current_players_df["player_id"].tolist()]
@@ -1905,7 +2032,7 @@ else:
 
                         st.subheader("⚔️ Match Play Setup")
 
-                        if edit_format == "MATCH PLAY TEAMS":
+                        if edit_match_play_format == "MATCH PLAY TEAMS":
                             expected_per_side = 2
                             match_size = 4
                             side_labels_edit = {1: "Team A", 2: "Team B"}
@@ -1963,12 +2090,37 @@ else:
                                 key=f"edit_hcp_{event_id}_{player_id}"
                             )
 
+                            player_row = current_players_df[
+                                current_players_df["player_id"] == player_id
+                            ].iloc[0]
+                            default_group = (
+                                int(player_row["group_number"])
+                                if pd.notna(player_row["group_number"]) and int(player_row["group_number"]) > 0
+                                else (index // 4) + 1
+                            )
+                            edit_group = st.number_input(
+                                f"Scoring group — {current_names[player_id]}",
+                                min_value=1,
+                                max_value=50,
+                                value=default_group,
+                                step=1,
+                                key=f"edit_group_{event_id}_{player_id}"
+                            )
+                            edit_scorer = st.checkbox(
+                                f"Scorer — {current_names[player_id]}",
+                                value=bool(player_row["is_scorer"]) or (
+                                    default_group == (index // 4) + 1 and index % 4 == 0
+                                ),
+                                key=f"edit_scorer_{event_id}_{player_id}"
+                            )
+
                             edit_event_players.append({
                                 "player_id": player_id,
                                 "name": current_names[player_id],
                                 "handicap": float(edit_handicap),
-                                "group_number": 0,
-                                "is_scorer": False
+                                "group_number": int(edit_group),
+                                "is_scorer": bool(edit_scorer),
+                                "status": str(player_row.get("status", "ACTIVE"))
                             })
 
                         edit_match_map = {}
@@ -1991,6 +2143,15 @@ else:
                                         2: sides[2]
                                     }
                                 })
+
+                        edit_groups = {}
+                        for player in edit_event_players:
+                            edit_groups.setdefault(player["group_number"], []).append(player)
+                        for group_number, group_players in edit_groups.items():
+                            if len(group_players) > 4:
+                                edit_errors.append(f"Scoring group {group_number} has more than four players.")
+                            if sum(bool(player["is_scorer"]) for player in group_players) != 1:
+                                edit_errors.append(f"Scoring group {group_number} must have exactly ONE scorer.")
 
                     else:
 
@@ -2105,13 +2266,14 @@ else:
                                     edit_name,
                                     edit_date,
                                     edit_format,
-                                    edit_event_players
+                                    edit_event_players,
+                                    edit_side_games
                                 )
 
-                                if edit_format in ("MATCH PLAY TEAMS", "MATCH PLAY SINGLES"):
+                                if edit_match_play_selected:
                                     save_match_play_setup(
                                         event_id,
-                                        edit_format,
+                                        edit_match_play_format,
                                         edit_match_play_setup
                                     )
                                 else:
@@ -2439,4 +2601,3 @@ else:
                 )
 
         st.divider()
-

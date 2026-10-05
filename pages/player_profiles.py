@@ -1,5 +1,6 @@
 
 import streamlit as st
+from pathlib import Path
 import pandas as pd
 
 from database import get_connection
@@ -11,7 +12,7 @@ from database import get_connection
 
 st.set_page_config(
     page_title="Golfing Warriors - Player Profiles",
-    page_icon="🏌️",
+    page_icon=str(Path(__file__).resolve().parent.parent / "assets" / "golfing-warriors-icon.png"),
     layout="wide"
 )
 

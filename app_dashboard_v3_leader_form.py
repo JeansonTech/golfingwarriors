@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from pathlib import Path
 
 from database import (
     init_database,
@@ -14,7 +15,7 @@ from database import (
 
 st.set_page_config(
     page_title="Golfing Warriors",
-    page_icon="🏌️",
+    page_icon=str(Path(__file__).resolve().parent / "assets" / "golfing-warriors-icon.png"),
     layout="wide",
     initial_sidebar_state="expanded"
 )

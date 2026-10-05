@@ -1,4 +1,5 @@
 import streamlit as st
+from pathlib import Path
 import pandas as pd
 
 from database import get_connection
@@ -18,7 +19,7 @@ from scoring.scoring_engine import (
 
 st.set_page_config(
     page_title="Golfing Warriors - Live Scoring",
-    page_icon="🏌️",
+    page_icon=str(Path(__file__).resolve().parent.parent / "assets" / "golfing-warriors-icon.png"),
     layout="wide"
 )
 
@@ -346,6 +347,22 @@ def get_event(event_id):
 
     finally:
 
+        connection.close()
+
+
+def get_event_competitions(event_id, main_format):
+    """Return enabled scoreboards, including a safe legacy fallback."""
+    connection = get_connection()
+    try:
+        rows = pd.read_sql_query(
+            "SELECT competition_code FROM event_competitions WHERE event_id = %s",
+            connection,
+            params=(int(event_id),)
+        )
+        selected = set(rows["competition_code"].astype(str))
+        selected.add(main_format)
+        return selected
+    finally:
         connection.close()
 
 
@@ -840,9 +857,8 @@ if event_df.empty:
 event = event_df.iloc[0]
 
 stored_event_format = str(event["format"])
-# IPS is the primary competition for all new events. Legacy NET/MATCH PLAY
-# event records are still scored using the IPS engine so they remain usable.
-event_format = "IPS"
+event_format = stored_event_format if stored_event_format in ("IPS", "NET") else "IPS"
+selected_competitions = get_event_competitions(event_id, event_format)
 status = event["status"]
 
 
@@ -894,9 +910,13 @@ with event_col3:
     finally:
         match_play_connection.close()
 
-    competition_label = "IPS + NET"
     if int(match_play_count) > 0:
-        competition_label += " + MATCH PLAY"
+        selected_competitions.add("MATCH_PLAY")
+    competition_label = " + ".join(
+        code.replace("_", " ")
+        for code in ("IPS", "NET", "MATCH_PLAY")
+        if code in selected_competitions
+    )
 
     st.write(
         f"🏆 **{competition_label}**"
@@ -1890,77 +1910,64 @@ match_play_results = build_match_play_results(
 )
 
 
-tab_ips, tab_net, tab_match = st.tabs(
-    [
-        "🏆 IPS",
-        "🏆 NET",
-        "⚔️ MATCH PLAY"
-    ]
-)
+leaderboard_labels = {
+    "IPS": "🏆 IPS",
+    "NET": "🏆 NET",
+    "MATCH_PLAY": "⚔️ MATCH PLAY"
+}
+visible_competitions = [
+    code for code in ("IPS", "NET", "MATCH_PLAY")
+    if code in selected_competitions
+]
+leaderboard_tabs = st.tabs([leaderboard_labels[code] for code in visible_competitions])
 
-
-with tab_ips:
-    ips_df = build_player_leaderboard("IPS")
-    st.dataframe(
-        ips_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Thru": st.column_config.NumberColumn(
-                "Thru",
-                format="%d"
+for competition_code, leaderboard_tab in zip(visible_competitions, leaderboard_tabs):
+    if competition_code == "IPS":
+        with leaderboard_tab:
+            ips_df = build_player_leaderboard("IPS")
+            st.dataframe(
+                ips_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Thru": st.column_config.NumberColumn("Thru", format="%d")
+                }
             )
-        }
-    )
-
-
-with tab_net:
-    net_df = build_player_leaderboard("NET")
-    st.dataframe(
-        net_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Thru": st.column_config.NumberColumn(
-                "Thru",
-                format="%d"
+    elif competition_code == "NET":
+        with leaderboard_tab:
+            net_df = build_player_leaderboard("NET")
+            st.dataframe(
+                net_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Thru": st.column_config.NumberColumn("Thru", format="%d")
+                }
             )
-        }
-    )
-
-
-with tab_match:
-    st.subheader("⚔️ Match Play")
-    st.caption(
-        "Handicaps drop to the lowest handicap in each match. "
-        "Teams use the best net score of the two players on each hole."
-    )
-
-    if not match_play_results:
-        st.info(
-            "No Match Play matches are configured for this event."
-        )
     else:
-        for match in match_play_results:
-            st.markdown(f"### Match {match['Match']} — {match['Type']}")
-
-            side1_col, score_col, side2_col = st.columns([3, 1, 3])
-            with side1_col:
-                st.write(f"**{match['Side 1']}**")
-            with score_col:
-                st.metric(
-                    "Score",
-                    match["Score"],
-                    help=f"Through {match['Thru']} hole(s)"
-                )
-            with side2_col:
-                st.write(f"**{match['Side 2']}**")
-
+        with leaderboard_tab:
+            st.subheader("⚔️ Match Play")
             st.caption(
-                f"Through {match['Thru']} • {match['Result']}"
+                "Handicaps drop to the lowest handicap in each match. "
+                "Teams use the best net score of the two players on each hole."
             )
 
-            st.divider()
+            if not match_play_results:
+                st.info("No Match Play matches are configured for this event.")
+            else:
+                for match in match_play_results:
+                    st.markdown(f"### Match {match['Match']} — {match['Type']}")
+                    side1_col, score_col, side2_col = st.columns([3, 1, 3])
+                    with side1_col:
+                        st.write(f"**{match['Side 1']}**")
+                    with score_col:
+                        st.metric("Score", match["Score"], help=f"Through {match['Thru']} hole(s)")
+                    with side2_col:
+                        st.write(f"**{match['Side 2']}**")
+                    st.caption(f"Through {match['Thru']} • {match['Result']}")
+                    st.divider()
+
+
 
 
 # ============================================================

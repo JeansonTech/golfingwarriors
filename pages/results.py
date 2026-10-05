@@ -1,5 +1,6 @@
 
 import streamlit as st
+from pathlib import Path
 import pandas as pd
 
 from database import get_connection
@@ -13,7 +14,7 @@ from scoring.scoring_engine import calculate_ips_points
 
 st.set_page_config(
     page_title="Golfing Warriors - Results",
-    page_icon="📋",
+    page_icon=str(Path(__file__).resolve().parent.parent / "assets" / "golfing-warriors-icon.png"),
     layout="wide"
 )
 
