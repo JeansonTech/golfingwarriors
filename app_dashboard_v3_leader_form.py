@@ -20,6 +20,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+from pwa import inject_pwa_metadata
+
+inject_pwa_metadata()
+
 
 # ============================================================
 # DATABASE

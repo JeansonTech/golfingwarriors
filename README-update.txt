@@ -1,9 +1,11 @@
-Golfing Warriors update
+Golfing Warriors event formats and mobile icon update
 
-Replace the matching paths in the repository with the files in this bundle.
+Replace the matching repository paths in this bundle.
 
-The update adds a main IPS/NET competition and selectable IPS, NET, and Match Play side games. The main format remains the event's official format and determines final positions and ranking points. Match Play retains its separate Teams/Singles pairing setup; scoring fourballs are configured alongside it.
+Events now have one official IPS or NET format and optional IPS, NET, and Match Play side games. The official format determines final positions and ranking points. Match Play keeps the existing Teams/Singles pairing setup and is configured alongside scoring fourballs.
 
-The app now stores selected scoreboards in event_competitions. Database initialization creates this table and backfills both IPS and NET for existing events so their current leaderboard visibility is retained. Existing Match Play setups are backfilled when available.
+The database initialization adds event_competitions and keeps IPS and NET boards enabled for existing events. Existing Match Play pairings are retained and detected.
 
-The repository did not contain a PWA manifest or custom icon assets. The bundle adds assets/golfing-warriors-icon.png and configures the Streamlit page favicon to use it on active app pages. Streamlit documents page_icon as the page favicon; a separate PWA manifest was not present to edit.
+For mobile home-screen icons, this bundle includes the Streamlit static-serving config, an Android web app manifest and 192/512 icons, and an iOS 180px Apple touch icon. pwa.py inserts manifest and Apple icon links into the page head. After deploying, remove the existing phone shortcut and add it again so the phone refreshes its cached icon.
+
+The app uses HTTPS when installed as a home-screen web app. No offline service worker is included.

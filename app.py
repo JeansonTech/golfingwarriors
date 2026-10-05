@@ -15,6 +15,10 @@ st.set_page_config(
     initial_sidebar_state="auto",
 )
 
+from pwa import inject_pwa_metadata
+
+inject_pwa_metadata()
+
 
 # ============================================================
 # PAGE DISCOVERY
