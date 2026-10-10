@@ -1971,8 +1971,42 @@ else:
                     else:
                         edit_match_play_format = None
 
+                    current_player_rows = {
+                        int(row["player_id"]): row
+                        for _, row in current_players_df.iterrows()
+                    }
+                    edit_player_records = {
+                        int(row["player_id"]): {
+                            "name": str(row["name"]),
+                            "handicap": float(row["event_handicap"]),
+                        }
+                        for _, row in current_players_df.iterrows()
+                    }
+                    for _, row in players.iterrows():
+                        edit_player_records.setdefault(
+                            int(row["id"]),
+                            {
+                                "name": str(row["name"]),
+                                "handicap": float(row["current_handicap"]),
+                            }
+                        )
+
+                    current_event_player_ids = list(current_player_rows)
+                    edit_player_ids = st.multiselect(
+                        "Players in this event",
+                        options=sorted(
+                            edit_player_records,
+                            key=lambda player_id: edit_player_records[player_id]["name"].casefold()
+                        ),
+                        default=current_event_player_ids,
+                        format_func=lambda player_id: edit_player_records[int(player_id)]["name"],
+                        key=f"edit_players_{event_id}"
+                    )
+                    if not edit_player_ids:
+                        st.warning("Select at least one player for this event.")
+
                     st.caption(
-                        "Player handicaps below are the event snapshots. Changing them here does not change the player's normal handicap. A player can be marked Withdrawn / No-show without removing the player from the event or changing the fourball assignment."
+                        "Player handicaps below are event snapshots. Added players use their current handicap as the starting event handicap. Removing a player excludes them from this event."
                     )
 
                     # --------------------------------------------
@@ -1986,10 +2020,10 @@ else:
                     if edit_match_play_selected:
 
                         current_match_df = get_match_play_setup(event_id)
-                        current_ids = [int(x) for x in current_players_df["player_id"].tolist()]
+                        current_ids = [int(x) for x in edit_player_ids]
                         current_names = {
-                            int(row["player_id"]): row["name"]
-                            for _, row in current_players_df.iterrows()
+                            player_id: edit_player_records[player_id]["name"]
+                            for player_id in current_ids
                         }
 
                         st.subheader("⚔️ Match Play Setup")
@@ -2040,24 +2074,26 @@ else:
                                 "side_number": int(selected_side)
                             })
 
+                            player_row = current_player_rows.get(player_id)
+                            default_handicap = (
+                                float(player_row["event_handicap"])
+                                if player_row is not None
+                                else edit_player_records[player_id]["handicap"]
+                            )
                             edit_handicap = st.number_input(
                                 f"Handicap — {current_names[player_id]}",
                                 min_value=-10.0,
                                 max_value=64.0,
-                                value=float(current_players_df.loc[
-                                    current_players_df["player_id"] == player_id,
-                                    "event_handicap"
-                                ].iloc[0]),
+                                value=default_handicap,
                                 step=0.1,
                                 key=f"edit_hcp_{event_id}_{player_id}"
                             )
 
-                            player_row = current_players_df[
-                                current_players_df["player_id"] == player_id
-                            ].iloc[0]
                             default_group = (
                                 int(player_row["group_number"])
-                                if pd.notna(player_row["group_number"]) and int(player_row["group_number"]) > 0
+                                if player_row is not None
+                                and pd.notna(player_row["group_number"])
+                                and int(player_row["group_number"]) > 0
                                 else (index // 4) + 1
                             )
                             edit_group = st.number_input(
@@ -2074,7 +2110,7 @@ else:
                                 "handicap": float(edit_handicap),
                                 "group_number": int(edit_group),
                                 "is_scorer": False,
-                                "status": str(player_row.get("status", "ACTIVE"))
+                                "status": str(player_row.get("status", "ACTIVE")) if player_row is not None else "ACTIVE"
                             })
 
                         edit_match_map = {}
@@ -2107,23 +2143,37 @@ else:
 
                     else:
 
-                        for player_index, player in current_players_df.iterrows():
-                            player_id = int(player["player_id"])
+                        for player_index, player_id in enumerate(edit_player_ids):
+                            player_id = int(player_id)
+                            player = current_player_rows.get(player_id)
+                            player_name = edit_player_records[player_id]["name"]
+                            current_status = (
+                                str(player.get("status", "ACTIVE")).upper()
+                                if player is not None else "ACTIVE"
+                            )
+                            default_group = (
+                                max(1, int(player["group_number"]))
+                                if player is not None and pd.notna(player["group_number"])
+                                else (player_index // 4) + 1
+                            )
+                            default_handicap = (
+                                float(player["event_handicap"])
+                                if player is not None
+                                else edit_player_records[player_id]["handicap"]
+                            )
 
                             pcol1, pcol2, pcol3 = st.columns([3, 1, 1.5])
 
-                            current_status = str(player.get("status", "ACTIVE")).upper()
-
                             with pcol1:
                                 status_label = "🟢 Active" if current_status == "ACTIVE" else "🟠 Withdrawn"
-                                st.write(f"**{player['name']}**  {status_label}")
+                                st.write(f"**{player_name}**  {status_label}")
 
                             with pcol2:
                                 edit_group = st.number_input(
                                     "Group",
                                     min_value=1,
                                     max_value=50,
-                                    value=max(1, int(player["group_number"])),
+                                    value=default_group,
                                     step=1,
                                     key=f"edit_group_{event_id}_{player_id}"
                                 )
@@ -2138,17 +2188,17 @@ else:
                                 )
 
                             edit_handicap = st.number_input(
-                                f"Handicap — {player['name']}",
+                                f"Handicap — {player_name}",
                                 min_value=-10.0,
                                 max_value=64.0,
-                                value=float(player["event_handicap"]),
+                                value=default_handicap,
                                 step=0.1,
                                 key=f"edit_hcp_{event_id}_{player_id}"
                             )
 
                             edit_event_players.append({
                                 "player_id": player_id,
-                                "name": player["name"],
+                                "name": player_name,
                                 "handicap": float(edit_handicap),
                                 "group_number": int(edit_group),
                                 "is_scorer": False,
@@ -2164,6 +2214,9 @@ else:
                                 edit_errors.append(
                                     f"Fourball {group_number} has more than four players."
                                 )
+
+                    if not edit_player_ids:
+                        edit_errors.append("Select at least one player for the event.")
 
                     if not edit_name.strip():
                         edit_errors.append("Event name cannot be empty.")
