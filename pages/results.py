@@ -824,9 +824,11 @@ def get_closed_event_ranking_rows():
                 e.id AS event_id,
                 e.name AS event_name,
                 e.event_date,
+                e.format AS event_format,
                 er.player_id,
                 p.name AS player_name,
                 er.net_total,
+                er.ips_total,
                 er.final_position,
                 er.ranking_points AS result_points,
                 rp.points AS ledger_points
@@ -915,10 +917,13 @@ def get_closed_event_ranking_rows():
             tie_breakers[(int(event_id), int(player_id))] = {
                 "last_6_net": calculated["last_6_net"],
                 "last_3_net": calculated["last_3_net"],
-                "last_hole_net": calculated["last_hole_net"]
+                "last_hole_net": calculated["last_hole_net"],
+                "last_6_ips": calculated["last_6_ips"],
+                "last_3_ips": calculated["last_3_ips"],
+                "last_hole_ips": calculated["last_hole_ips"]
             }
 
-    for column in ("last_6_net", "last_3_net", "last_hole_net"):
+    for column in ("last_6_net", "last_3_net", "last_hole_net", "last_6_ips", "last_3_ips", "last_hole_ips"):
         result_rows[column] = [
             tie_breakers.get(
                 (int(row["event_id"]), int(row["player_id"])),
@@ -932,79 +937,55 @@ def get_closed_event_ranking_rows():
 
 
 def build_historical_ranking_reallocation_plan(rows_df):
-    """Re-rank closed events by net total and the app's countback rules."""
+    """Re-rank closed events by their main format and first-place countback."""
     changes = []
     unresolved = []
-
     if rows_df.empty:
         return changes, unresolved
 
-    countback_columns = ["last_6_net", "last_3_net", "last_hole_net"]
     for event_id, event_rows in rows_df.groupby("event_id", sort=False):
         event_rows = event_rows.copy()
         event_name = str(event_rows.iloc[0]["event_name"])
-        saved_positions = pd.to_numeric(
-            event_rows["final_position"],
-            errors="coerce"
-        )
-        saved_points = pd.to_numeric(
-            event_rows["result_points"],
-            errors="coerce"
-        )
-
+        is_net = str(event_rows.iloc[0]["event_format"]).upper() == "NET"
+        score_column = "net_total" if is_net else "ips_total"
+        countback_columns = (["last_6_net", "last_3_net", "last_hole_net"] if is_net else
+                             ["last_6_ips", "last_3_ips", "last_hole_ips"])
+        ascending_score = is_net
+        saved_positions = pd.to_numeric(event_rows["final_position"], errors="coerce")
+        saved_points = pd.to_numeric(event_rows["result_points"], errors="coerce")
         player_count = len(event_rows)
-        if (
-            event_rows["player_id"].isna().any()
-            or pd.to_numeric(event_rows["net_total"], errors="coerce").isna().any()
-        ):
+
+        if (event_rows["player_id"].isna().any()
+                or pd.to_numeric(event_rows[score_column], errors="coerce").isna().any()):
             unresolved.append({
-                "Event": event_name,
-                "Event ID": int(event_id),
+                "Event": event_name, "Event ID": int(event_id),
                 "Reason": "The closed event is missing a complete result row."
             })
             continue
 
-        position_values = [
-            int(value) for value in saved_positions if pd.notna(value)
-        ]
         position_counts = event_rows.groupby("final_position", dropna=False).size()
         expected_position = 1
-        valid_shared_positions = (
-            len(position_values) == player_count
-            and not saved_positions.isna().any()
-            and not saved_points.isna().any()
-        )
+        valid_positions = not saved_positions.isna().any() and not saved_points.isna().any()
         for position, count in position_counts.items():
             if pd.isna(position) or int(position) != expected_position:
-                valid_shared_positions = False
+                valid_positions = False
                 break
             expected_position += int(count)
-
-        if not valid_shared_positions:
+        if not valid_positions:
             unresolved.append({
-                "Event": event_name,
-                "Event ID": int(event_id),
-                "Reason": (
-                    "Existing places include gaps or missing values; "
-                    "the historical ranking order cannot be reconstructed safely."
-                )
+                "Event": event_name, "Event ID": int(event_id),
+                "Reason": ("Existing places include gaps or missing values; "
+                           "the historical ranking order cannot be reconstructed safely.")
             })
             continue
 
-        historical_tie = position_counts.gt(1).any()
-        if historical_tie:
-            active_schedule = event_rows.iloc[0].get(
-                "_active_point_schedule",
-                {}
-            )
+        if position_counts.gt(1).any():
+            active_schedule = event_rows.iloc[0].get("_active_point_schedule", {})
             if not all(position in active_schedule for position in range(1, player_count + 1)):
                 unresolved.append({
-                    "Event": event_name,
-                    "Event ID": int(event_id),
-                    "Reason": (
-                        "A historical tied place needs countback, but the active "
-                        "ranking settings do not define the full point scale."
-                    )
+                    "Event": event_name, "Event ID": int(event_id),
+                    "Reason": ("A historical tied place needs the active ranking settings "
+                               "to define the full point scale.")
                 })
                 continue
             points_by_position = active_schedule
@@ -1014,99 +995,67 @@ def build_historical_ranking_reallocation_plan(rows_df):
                 for _, row in event_rows.iterrows()
             }
 
-        first_score = int(event_rows["net_total"].min())
-        first_group = event_rows[event_rows["net_total"] == first_score]
-        missing_countback = (
-            len(first_group) > 1
-            and first_group[countback_columns].isna().to_numpy().any()
-        )
-        if missing_countback:
+        best_score = event_rows[score_column].min() if is_net else event_rows[score_column].max()
+        first_group = event_rows[event_rows[score_column] == best_score]
+        if len(first_group) > 1 and first_group[countback_columns].isna().to_numpy().any():
+            label = "net strokes" if is_net else "IPS points"
             unresolved.append({
-                "Event": event_name,
-                "Event ID": int(event_id),
-                "Reason": (
-                    "Players tied on net total are missing saved hole scores "
-                    "needed for the last-six, last-three, and last-hole countback."
-                )
+                "Event": event_name, "Event ID": int(event_id),
+                "Reason": (f"Players tied for first on {label} are missing saved hole scores "
+                           "needed for last-six, last-three, and last-hole countback.")
             })
             continue
 
-        ordered_by_score = event_rows.sort_values(
-            by=["net_total", "player_name"],
-            ascending=[True, True],
-            kind="stable"
+        by_score = event_rows.sort_values(
+            by=[score_column, "player_name"],
+            ascending=[ascending_score, True], kind="stable"
         )
-        first_group = ordered_by_score[
-            ordered_by_score["net_total"] == first_score
-        ].sort_values(
+        first_group = by_score[by_score[score_column] == best_score].sort_values(
             by=[*countback_columns, "player_name"],
-            ascending=[True, True, True, True],
+            ascending=[ascending_score, ascending_score, ascending_score, True],
             kind="stable"
         )
         ordered = pd.concat(
-            [
-                first_group,
-                ordered_by_score[ordered_by_score["net_total"] != first_score]
-            ],
+            [first_group, by_score[by_score[score_column] != best_score]],
             ignore_index=True
         )
 
-        def same_countback(left, right):
-            if int(left["net_total"]) != int(right["net_total"]):
+        def remains_tied(left, right):
+            if int(left[score_column]) != int(right[score_column]):
                 return False
-            if int(left["net_total"]) != first_score:
+            if int(left[score_column]) != int(best_score):
                 return True
-            return all(
-                int(left[column]) == int(right[column])
-                for column in countback_columns
-            )
+            return all(int(left[column]) == int(right[column]) for column in countback_columns)
 
         index = 0
         while index < player_count:
             end_index = index + 1
-            while (
-                end_index < player_count
-                and same_countback(ordered.iloc[index], ordered.iloc[end_index])
+            while end_index < player_count and remains_tied(
+                ordered.iloc[index], ordered.iloc[end_index]
             ):
                 end_index += 1
-
             first_position = index + 1
-            occupied_positions = range(first_position, end_index + 1)
-            allocated_points = sum(
-                points_by_position[position]
-                for position in occupied_positions
-            ) / (end_index - index)
+            positions = range(first_position, end_index + 1)
+            new_points = sum(points_by_position[p] for p in positions) / (end_index - index)
 
             for row_index in range(index, end_index):
                 row = ordered.iloc[row_index]
-                new_position = first_position
-                new_points = allocated_points
                 old_position = int(row["final_position"])
                 old_points = float(row["result_points"])
                 ledger_value = row["ledger_points"]
-                ledger_mismatch = (
-                    pd.isna(ledger_value)
-                    or abs(float(ledger_value) - old_points) > 0.0001
-                )
-                if (
-                    old_position != new_position
-                    or abs(old_points - new_points) > 0.0001
-                    or ledger_mismatch
-                ):
+                ledger_mismatch = (pd.isna(ledger_value)
+                                   or abs(float(ledger_value) - old_points) > 0.0001)
+                if (old_position != first_position
+                        or abs(old_points - new_points) > 0.0001
+                        or ledger_mismatch):
                     changes.append({
-                        "Event": event_name,
-                        "Event ID": int(event_id),
-                        "Player ID": int(row["player_id"]),
-                        "Player": row["player_name"],
-                        "Old Pos": old_position,
-                        "New Pos": new_position,
-                        "Old Points": old_points,
-                        "New Points": new_points,
+                        "Event": event_name, "Event ID": int(event_id),
+                        "Player ID": int(row["player_id"]), "Player": row["player_name"],
+                        "Old Pos": old_position, "New Pos": first_position,
+                        "Old Points": old_points, "New Points": new_points,
                         "Old Ledger Points": ledger_value
                     })
-
             index = end_index
-
     return changes, unresolved
 
 
@@ -1380,9 +1329,13 @@ results = get_event_results(
 
 if not results.empty:
     event_par_total = get_event_par_total(event_id)
-    results["to_par"] = results["net_total"] - event_par_total
+    if str(event["format"]).upper() == "NET":
+        results["to_par"] = results["net_total"] - event_par_total
+    else:
+        # IPS par is 2 points per hole, so a full round is 36 points.
+        results["to_par"] = 36 - results["ips_total"]
     results = results.sort_values(
-        by=["to_par", "final_position", "player_name"],
+        by=["final_position", "to_par", "player_name"],
         ascending=[True, True, True],
         kind="stable"
     ).reset_index(drop=True)
@@ -1435,8 +1388,9 @@ else:
     )
 
 st.caption(
-    "Finishing positions and championship points are based on net score to par. "
-    "The IPS column shows each player's Stableford-style total."
+    "Championship positions and points follow the event format: IPS ranks by "
+    "IPS points (36 minus points is shown to par), while NET ranks by "
+    "handicap-adjusted net strokes."
 )
 
 
@@ -1505,12 +1459,13 @@ st.dataframe(
 if auth_is_admin():
     with st.expander("🔎 Admin: Audit past event ranking points"):
         st.info(
-            "This checks every completed event by net score to par. For a tie "
-            "for first, it applies last-six, last-three, then last-hole net "
-            "countback; ties in later places remain tied and share points. It "
-            "preserves recorded point scales where places are unique; for "
-            "historical tied places, the preview uses active ranking settings. "
-            "Missing countback scores or broken place sequences are flagged."
+            "This checks each completed event using its main format: IPS points "
+            "for IPS events and handicap-adjusted net strokes for NET events. "
+            "For a tie for first, it applies the matching last-six, last-three, "
+            "then last-hole countback. Ties in later places remain tied and share "
+            "points. Unique historical places keep their recorded point scale; "
+            "historical ties use active ranking settings. Missing countback "
+            "scores or broken place sequences are flagged."
         )
         preview_key = "historical_ranking_to_par_preview"
         if st.button(
