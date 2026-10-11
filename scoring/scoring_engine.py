@@ -347,20 +347,15 @@ def rank_completed_players(
     event_format
 ):
     """
-    Rank completed players.
+    Rank completed event players by handicap-adjusted score to par.
 
-    NET:
-        Lowest score wins.
+    Event par is common to every player in the event, so comparing
+    net_total is equivalent to comparing each player's net score to par.
+    IPS points remain available as a per-hole scoring measure, but do not
+    decide the event's finishing positions.
 
-    IPS:
-        Highest score wins.
-
-    Tie-breaks:
-
-        1. Main score
-        2. Last 6
-        3. Last 3
-        4. Last hole
+    Players with the same net total share a place and the points
+    available for the positions they occupy.
     """
 
     completed_results = [
@@ -369,39 +364,10 @@ def rank_completed_players(
         if result["completed"] == 18
     ]
 
-    if event_format == "NET":
-
-        return sorted(
-            completed_results,
-            key=lambda result: (
-                result["net_total"],
-                result["last_6_net"],
-                result["last_3_net"],
-                (
-                    result["last_hole_net"]
-                    if result["last_hole_net"]
-                    is not None
-                    else 999
-                )
-            )
-        )
-
     return sorted(
         completed_results,
-        key=lambda result: (
-            -result["ips_total"],
-            -result["last_6_ips"],
-            -result["last_3_ips"],
-            (
-                -result["last_hole_ips"]
-                if result["last_hole_ips"]
-                is not None
-                else 999
-            )
-        )
+        key=lambda result: result["net_total"]
     )
-
-
 # ============================================================
 # RANKING POINTS
 # ============================================================
@@ -412,9 +378,9 @@ def allocate_ranking_points(
     event_format
 ):
     """
-    Allocate ranking points.
+    Allocate ranking points for the score-to-par order.
 
-    If players are still tied after all tie-breaks,
+    If players are still tied after all net-score tie-breaks,
     they share the average of the positions occupied.
     """
 
@@ -451,37 +417,10 @@ def allocate_ranking_points(
                 next_index
             ]
 
-            if event_format == "NET":
-
-                tied = (
-                    current["net_total"]
-                    == other["net_total"]
-                    and
-                    current["last_6_net"]
-                    == other["last_6_net"]
-                    and
-                    current["last_3_net"]
-                    == other["last_3_net"]
-                    and
-                    current["last_hole_net"]
-                    == other["last_hole_net"]
-                )
-
-            else:
-
-                tied = (
-                    current["ips_total"]
-                    == other["ips_total"]
-                    and
-                    current["last_6_ips"]
-                    == other["last_6_ips"]
-                    and
-                    current["last_3_ips"]
-                    == other["last_3_ips"]
-                    and
-                    current["last_hole_ips"]
-                    == other["last_hole_ips"]
-                )
+            tied = (
+                current["net_total"]
+                == other["net_total"]
+            )
 
             if not tied:
 
