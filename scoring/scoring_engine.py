@@ -347,15 +347,11 @@ def rank_completed_players(
     event_format
 ):
     """
-    Rank completed event players by handicap-adjusted score to par.
+    Rank completed event players by net score to par, then countback.
 
-    Event par is common to every player in the event, so comparing
-    net_total is equivalent to comparing each player's net score to par.
-    IPS points remain available as a per-hole scoring measure, but do not
-    decide the event's finishing positions.
-
-    Players with the same net total share a place and the points
-    available for the positions they occupy.
+    Countback follows the established Golfing Warriors order: last 6 net,
+    last 3 net, then the 18th-hole net score. Players still tied after all
+    countbacks share the place and ranking points.
     """
 
     completed_results = [
@@ -364,9 +360,18 @@ def rank_completed_players(
         if result["completed"] == 18
     ]
 
+    def countback_value(result, key):
+        value = result.get(key)
+        return int(value) if value is not None else 999
+
     return sorted(
         completed_results,
-        key=lambda result: result["net_total"]
+        key=lambda result: (
+            int(result["net_total"]),
+            countback_value(result, "last_6_net"),
+            countback_value(result, "last_3_net"),
+            countback_value(result, "last_hole_net")
+        )
     )
 
 
@@ -380,110 +385,55 @@ def allocate_ranking_points(
     event_format
 ):
     """
-    Allocate ranking points for the score-to-par order.
+    Allocate points by net score and countback order.
 
-    Players with the same net total share the average points
-    for the positions they occupy.
+    Only players still tied after the full countback share the points
+    available for their occupied positions.
     """
 
     if not ranked_results:
-
         return []
 
     output = []
-
     index = 0
+    tie_breakers = ("last_6_net", "last_3_net", "last_hole_net")
 
-    while index < len(
-        ranked_results
-    ):
-
-        current = ranked_results[
-            index
-        ]
-
-        tie_group = [
-            current
-        ]
-
-        next_index = (
-            index + 1
+    def remains_tied(left, right):
+        return (
+            int(left["net_total"]) == int(right["net_total"])
+            and all(
+                left.get(key) == right.get(key)
+                for key in tie_breakers
+            )
         )
 
-        while (
-            next_index
-            < len(ranked_results)
-        ):
+    while index < len(ranked_results):
+        current = ranked_results[index]
+        tie_group = [current]
+        next_index = index + 1
 
-            other = ranked_results[
-                next_index
-            ]
-
-            tied = (
-                current["net_total"]
-                == other["net_total"]
-            )
-
-            if not tied:
-
+        while next_index < len(ranked_results):
+            other = ranked_results[next_index]
+            if not remains_tied(current, other):
                 break
-
-            tie_group.append(
-                other
-            )
-
+            tie_group.append(other)
             next_index += 1
 
-        first_position = (
-            index + 1
-        )
-
-        last_position = (
-            first_position
-            + len(tie_group)
-            - 1
-        )
-
-        positions = range(
-            first_position,
-            last_position + 1
-        )
-
+        first_position = index + 1
+        last_position = first_position + len(tie_group) - 1
         points = [
-            float(
-                ranking_points.get(
-                    position,
-                    0
-                )
-            )
-            for position in positions
+            float(ranking_points.get(position, 0))
+            for position in range(first_position, last_position + 1)
         ]
-
-        average_points = (
-            sum(points)
-            / len(points)
-            if points
-            else 0
-        )
+        average_points = sum(points) / len(points) if points else 0
 
         for player in tie_group:
-
-            player_copy = (
-                player.copy()
-            )
-
-            player_copy[
-                "final_position"
-            ] = first_position
-
-            player_copy[
-                "ranking_points"
-            ] = average_points
-
-            output.append(
-                player_copy
-            )
+            player_copy = player.copy()
+            player_copy["final_position"] = first_position
+            player_copy["ranking_points"] = average_points
+            output.append(player_copy)
 
         index = next_index
 
     return output
+
