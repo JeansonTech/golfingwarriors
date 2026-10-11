@@ -1805,12 +1805,11 @@ def format_to_par(value):
     return f"{value:+d}"
 
 
-def calculate_live_to_par(result, score_type):
-    """Calculate score-to-par for the holes the player has completed.
+def calculate_live_to_par(result, score_type=None):
+    """Calculate actual net score-to-par for every saved hole.
 
-    IPS uses 2 points as the par-equivalent for each hole, so 3 IPS
-    points is -1, 2 is E and 1 is +1. NET compares each hole's net
-    score with the hole par.
+    This is independent of IPS points, which can bottom out at zero and
+    therefore do not show how far over par a high score finished.
     """
     player_id = int(result["player_id"])
     player_scores = score_dicts.get(player_id, {})
@@ -1824,60 +1823,50 @@ def calculate_live_to_par(result, score_type):
         gross = int(player_scores[hole_number])
         par_value = int(hole["par"])
         stroke_index_value = int(hole["stroke_index"])
-
-        if score_type == "IPS":
-            points = int(
-                calculate_ips_points(
-                    gross,
-                    par_value,
-                    result["handicap"],
-                    stroke_index_value
-                )
+        net_score = int(
+            calculate_net_score(
+                gross,
+                result["handicap"],
+                stroke_index_value
             )
-            total += 2 - points
-        else:
-            net_score = int(
-                calculate_net_score(
-                    gross,
-                    result["handicap"],
-                    stroke_index_value
-                )
-            )
-            total += net_score - par_value
+        )
+        total += net_score - par_value
 
     return total
 
 
 def build_player_leaderboard(score_type):
     """Build a live leaderboard for IPS or Net scoring."""
-    if score_type == "IPS":
-        sorted_results = sorted(
-            round_results,
-            key=lambda result: (
-                -result["ips_total"],
-                -result["completed"],
-                result["name"]
-            )
+    sorted_results = sorted(
+        round_results,
+        key=lambda result: (
+            calculate_live_to_par(result, score_type),
+            -result["completed"],
+            result["name"]
         )
+    )
+    if score_type == "IPS":
         score_column = "IPS"
         score_values = lambda result: result["ips_total"]
     else:
-        sorted_results = sorted(
-            round_results,
-            key=lambda result: (
-                result["net_total"],
-                -result["completed"],
-                result["name"]
-            )
-        )
         score_column = "Net"
         score_values = lambda result: result["net_total"]
 
+    to_par_values = [
+        calculate_live_to_par(result, score_type)
+        for result in sorted_results
+    ]
     rows = []
-    for position, result in enumerate(sorted_results, start=1):
+    tied_positions = {}
+    for index, result in enumerate(sorted_results):
+        to_par = to_par_values[index]
+        if to_par not in tied_positions:
+            tied_positions[to_par] = index + 1
+        position = tied_positions[to_par]
+        tied = to_par_values.count(to_par) > 1
         rows.append(
             {
-                "Pos": position,
+                "Pos": f"T{position}" if tied else position,
                 "Player": result["name"],
                 "HCP": result["handicap"],
                 "Gross": result["gross_total"],
@@ -2020,20 +2009,45 @@ if all_complete:
 
 
                 result_rows = []
+                event_par_total = sum(
+                    int(hole["par"])
+                    for hole in holes_df.to_dict("records")
+                )
 
 
-                for result in final_results:
+                display_results = sorted(
+                    final_results,
+                    key=lambda result: (
+                        int(result["net_total"]) - event_par_total,
+                        result["name"]
+                    )
+                )
+                display_to_par = [
+                    int(result["net_total"]) - event_par_total
+                    for result in display_results
+                ]
+                tied_positions = {}
+
+                for index, result in enumerate(display_results):
+                    to_par = display_to_par[index]
+                    if to_par not in tied_positions:
+                        tied_positions[to_par] = index + 1
+                    position = tied_positions[to_par]
+                    tied = display_to_par.count(to_par) > 1
 
                     result_rows.append(
                         {
                             "Position":
-                                result["final_position"],
+                                f"T{position}" if tied else position,
 
                             "Player":
                                 result["name"],
 
                             "Gross":
                                 result["gross_total"],
+
+                            "To Par":
+                                format_to_par(to_par),
 
                             "Net":
                                 result["net_total"],
