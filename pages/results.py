@@ -723,8 +723,26 @@ def get_closed_event_ranking_rows():
             """,
             connection
         )
+
+        point_rows = pd.read_sql_query(
+            """
+            SELECT position, points
+            FROM ranking_settings
+            WHERE active = TRUE
+            ORDER BY position
+            """,
+            connection
+        )
     finally:
         connection.close()
+
+    active_point_schedule = {
+        int(row["position"]): float(row["points"])
+        for _, row in point_rows.iterrows()
+    }
+    result_rows["_active_point_schedule"] = [
+        active_point_schedule for _ in range(len(result_rows))
+    ]
 
     tie_breakers = {}
     if not score_rows.empty:
@@ -806,26 +824,53 @@ def build_historical_ranking_reallocation_plan(rows_df):
         position_values = [
             int(value) for value in saved_positions if pd.notna(value)
         ]
-        if (
-            len(position_values) != player_count
-            or len(set(position_values)) != player_count
-            or sorted(position_values) != list(range(1, player_count + 1))
-            or saved_points.isna().any()
-        ):
+        position_counts = event_rows.groupby("final_position", dropna=False).size()
+        expected_position = 1
+        valid_shared_positions = (
+            len(position_values) == player_count
+            and not saved_positions.isna().any()
+            and not saved_points.isna().any()
+        )
+        for position, count in position_counts.items():
+            if pd.isna(position) or int(position) != expected_position:
+                valid_shared_positions = False
+                break
+            expected_position += int(count)
+
+        if not valid_shared_positions:
             unresolved.append({
                 "Event": event_name,
                 "Event ID": int(event_id),
                 "Reason": (
-                    "Existing places include ties, gaps, or missing values; "
-                    "the historical point scale cannot be reconstructed safely."
+                    "Existing places include gaps or missing values; "
+                    "the historical ranking order cannot be reconstructed safely."
                 )
             })
             continue
 
-        points_by_position = {
-            int(row["final_position"]): float(row["result_points"])
-            for _, row in event_rows.iterrows()
-        }
+        historical_tie = position_counts.gt(1).any()
+        if historical_tie:
+            active_schedule = event_rows.iloc[0].get(
+                "_active_point_schedule",
+                {}
+            )
+            if not all(position in active_schedule for position in range(1, player_count + 1)):
+                unresolved.append({
+                    "Event": event_name,
+                    "Event ID": int(event_id),
+                    "Reason": (
+                        "A historical tied place needs countback, but the active "
+                        "ranking settings do not define the full point scale."
+                    )
+                })
+                continue
+            points_by_position = active_schedule
+        else:
+            points_by_position = {
+                int(row["final_position"]): float(row["result_points"])
+                for _, row in event_rows.iterrows()
+            }
+
         score_groups = event_rows.groupby("net_total", dropna=False)
         missing_countback = any(
             group[countback_columns].isna().to_numpy().any()
@@ -1303,10 +1348,12 @@ st.dataframe(
 if auth_is_admin():
     with st.expander("🔎 Admin: Audit past event ranking points"):
         st.info(
-            "This checks every completed event. It reorders positions by net score "
-            "to par and preserves each event's recorded points-per-place scale. "
-            "Events with old tied, missing, or incomplete places are flagged for "
-            "review instead of being changed automatically."
+            "This checks every completed event using net score to par, then "
+            "last-six, last-three, and last-hole net countback. It preserves the "
+            "recorded points scale where places are unique; for historical tied "
+            "places it uses the active ranking settings and shows the proposed "
+            "points before you apply them. Missing scorecards or broken place "
+            "sequences are flagged for review."
         )
         preview_key = "historical_ranking_to_par_preview"
         if st.button(
