@@ -985,11 +985,11 @@ def build_historical_ranking_reallocation_plan(rows_df):
                 for _, row in event_rows.iterrows()
             }
 
-        score_groups = event_rows.groupby("net_total", dropna=False)
-        missing_countback = any(
-            group[countback_columns].isna().to_numpy().any()
-            for _, group in score_groups
-            if len(group) > 1
+        first_score = int(event_rows["net_total"].min())
+        first_group = event_rows[event_rows["net_total"] == first_score]
+        missing_countback = (
+            len(first_group) > 1
+            and first_group[countback_columns].isna().to_numpy().any()
         )
         if missing_countback:
             unresolved.append({
@@ -1002,19 +1002,34 @@ def build_historical_ranking_reallocation_plan(rows_df):
             })
             continue
 
-        ordered = event_rows.sort_values(
-            by=["net_total", *countback_columns, "player_name"],
-            ascending=[True, True, True, True, True],
+        ordered_by_score = event_rows.sort_values(
+            by=["net_total", "player_name"],
+            ascending=[True, True],
             kind="stable"
-        ).reset_index(drop=True)
+        )
+        first_group = ordered_by_score[
+            ordered_by_score["net_total"] == first_score
+        ].sort_values(
+            by=[*countback_columns, "player_name"],
+            ascending=[True, True, True, True],
+            kind="stable"
+        )
+        ordered = pd.concat(
+            [
+                first_group,
+                ordered_by_score[ordered_by_score["net_total"] != first_score]
+            ],
+            ignore_index=True
+        )
 
         def same_countback(left, right):
-            return (
-                int(left["net_total"]) == int(right["net_total"])
-                and all(
-                    int(left[column]) == int(right[column])
-                    for column in countback_columns
-                )
+            if int(left["net_total"]) != int(right["net_total"]):
+                return False
+            if int(left["net_total"]) != first_score:
+                return True
+            return all(
+                int(left[column]) == int(right[column])
+                for column in countback_columns
             )
 
         index = 0
@@ -1342,15 +1357,14 @@ if not results.empty:
         ascending=[True, True, True],
         kind="stable"
     ).reset_index(drop=True)
-    to_par_values = results["to_par"].tolist()
-    tied_positions = {}
     display_positions = []
-    for index, to_par in enumerate(to_par_values):
-        if to_par not in tied_positions:
-            tied_positions[to_par] = index + 1
-        position = tied_positions[to_par]
-        tied = to_par_values.count(to_par) > 1
-        display_positions.append(position_label(position, tied=tied))
+    for _, result_row in results.iterrows():
+        tied = int(
+            (results["final_position"] == result_row["final_position"]).sum()
+        ) > 1
+        display_positions.append(
+            position_label(result_row["final_position"], tied=tied)
+        )
     results["display_position"] = display_positions
 
 event_players = get_event_players(
@@ -1375,11 +1389,11 @@ winner = results.iloc[0]
 
 winner_score = format_to_par(winner["to_par"])
 winner_is_tied = (
-    int((results["to_par"] == winner["to_par"]).sum()) > 1
+    int((results["final_position"] == winner["final_position"]).sum()) > 1
 )
 if winner_is_tied:
     tied_winners = results[
-        results["to_par"] == winner["to_par"]
+        results["final_position"] == winner["final_position"]
     ]["player_name"].tolist()
     st.success(
         f"🏆 **Tied for first: {', '.join(tied_winners)}** "
@@ -1462,12 +1476,12 @@ st.dataframe(
 if auth_is_admin():
     with st.expander("🔎 Admin: Audit past event ranking points"):
         st.info(
-            "This checks every completed event using net score to par, then "
-            "last-six, last-three, and last-hole net countback. It preserves the "
-            "recorded points scale where places are unique; for historical tied "
-            "places it uses the active ranking settings and shows the proposed "
-            "points before you apply them. Missing scorecards or broken place "
-            "sequences are flagged for review."
+            "This checks every completed event by net score to par. For a tie "
+            "for first, it applies last-six, last-three, then last-hole net "
+            "countback; ties in later places remain tied and share points. It "
+            "preserves recorded point scales where places are unique; for "
+            "historical tied places, the preview uses active ranking settings. "
+            "Missing countback scores or broken place sequences are flagged."
         )
         preview_key = "historical_ranking_to_par_preview"
         if st.button(

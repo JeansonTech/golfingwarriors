@@ -347,11 +347,11 @@ def rank_completed_players(
     event_format
 ):
     """
-    Rank completed event players by net score to par, then countback.
+    Rank completed players by net score to par.
 
-    Countback follows the established Golfing Warriors order: last 6 net,
-    last 3 net, then the 18th-hole net score. Players still tied after all
-    countbacks share the place and ranking points.
+    If players tie for the lowest net total, use countback to decide first
+    place: last 6 net, last 3 net, then the 18th-hole net score. Ties in
+    every other position remain tied.
     """
 
     completed_results = [
@@ -359,20 +359,35 @@ def rank_completed_players(
         for result in results
         if result["completed"] == 18
     ]
+    ranked = sorted(
+        completed_results,
+        key=lambda result: int(result["net_total"])
+    )
+    if not ranked:
+        return ranked
+
+    first_score = int(ranked[0]["net_total"])
+    first_group = [
+        result for result in ranked
+        if int(result["net_total"]) == first_score
+    ]
+    remaining = [
+        result for result in ranked
+        if int(result["net_total"]) != first_score
+    ]
 
     def countback_value(result, key):
         value = result.get(key)
         return int(value) if value is not None else 999
 
-    return sorted(
-        completed_results,
+    first_group.sort(
         key=lambda result: (
-            int(result["net_total"]),
             countback_value(result, "last_6_net"),
             countback_value(result, "last_3_net"),
             countback_value(result, "last_hole_net")
         )
     )
+    return first_group + remaining
 
 
 # ============================================================
@@ -385,10 +400,10 @@ def allocate_ranking_points(
     event_format
 ):
     """
-    Allocate points by net score and countback order.
+    Allocate points by net score.
 
-    Only players still tied after the full countback share the points
-    available for their occupied positions.
+    Countback separates a tie for first. Remaining ties share the points
+    for the positions they occupy, regardless of countback scores.
     """
 
     if not ranked_results:
@@ -396,16 +411,15 @@ def allocate_ranking_points(
 
     output = []
     index = 0
+    first_score = int(ranked_results[0]["net_total"])
     tie_breakers = ("last_6_net", "last_3_net", "last_hole_net")
 
     def remains_tied(left, right):
-        return (
-            int(left["net_total"]) == int(right["net_total"])
-            and all(
-                left.get(key) == right.get(key)
-                for key in tie_breakers
-            )
-        )
+        if int(left["net_total"]) != int(right["net_total"]):
+            return False
+        if int(left["net_total"]) != first_score:
+            return True
+        return all(left.get(key) == right.get(key) for key in tie_breakers)
 
     while index < len(ranked_results):
         current = ranked_results[index]
