@@ -675,7 +675,7 @@ def recalculate_closed_event_after_score_correction(
 def get_closed_event_ranking_rows():
     connection = get_connection()
     try:
-        return pd.read_sql_query(
+        result_rows = pd.read_sql_query(
             """
             SELECT
                 e.id AS event_id,
@@ -698,18 +698,87 @@ def get_closed_event_ranking_rows():
             """,
             connection
         )
+        score_rows = pd.read_sql_query(
+            """
+            SELECT
+                e.id AS event_id,
+                ep.player_id,
+                ep.event_handicap,
+                p.name AS player_name,
+                eh.hole_number,
+                eh.par,
+                eh.stroke_index,
+                hs.gross_score
+            FROM events e
+            INNER JOIN event_players ep
+                ON ep.event_id = e.id AND ep.status = 'ACTIVE'
+            INNER JOIN players p ON p.id = ep.player_id
+            LEFT JOIN event_holes eh ON eh.event_id = e.id
+            LEFT JOIN hole_scores hs
+                ON hs.event_id = e.id
+                AND hs.player_id = ep.player_id
+                AND hs.hole_number = eh.hole_number
+            WHERE e.status = 'CLOSED'
+            ORDER BY e.id, ep.player_id, eh.hole_number
+            """,
+            connection
+        )
     finally:
         connection.close()
 
+    tie_breakers = {}
+    if not score_rows.empty:
+        for (event_id, player_id), player_rows in score_rows.groupby(
+            ["event_id", "player_id"], sort=False
+        ):
+            player_rows = player_rows.sort_values("hole_number")
+            if (
+                len(player_rows) != 18
+                or player_rows["gross_score"].isna().any()
+                or player_rows["hole_number"].isna().any()
+            ):
+                continue
+            player = {
+                "player_id": int(player_id),
+                "event_handicap": float(player_rows.iloc[0]["event_handicap"]),
+                "name": str(player_rows.iloc[0]["player_name"])
+            }
+            holes = player_rows[
+                ["hole_number", "par", "stroke_index"]
+            ].to_dict("records")
+            scores = {
+                int(row["hole_number"]): int(row["gross_score"])
+                for _, row in player_rows.iterrows()
+            }
+            calculated = calculate_player_round(player, holes, scores)
+            tie_breakers[(int(event_id), int(player_id))] = {
+                "last_6_net": calculated["last_6_net"],
+                "last_3_net": calculated["last_3_net"],
+                "last_hole_net": calculated["last_hole_net"]
+            }
+
+    for column in ("last_6_net", "last_3_net", "last_hole_net"):
+        result_rows[column] = [
+            tie_breakers.get(
+                (int(row["event_id"]), int(row["player_id"])),
+                {}
+            ).get(column)
+            if pd.notna(row["player_id"])
+            else None
+            for _, row in result_rows.iterrows()
+        ]
+    return result_rows
+
 
 def build_historical_ranking_reallocation_plan(rows_df):
-    """Re-rank closed events by net-to-par while preserving each event's point scale."""
+    """Re-rank closed events by net total and the app's countback rules."""
     changes = []
     unresolved = []
 
     if rows_df.empty:
         return changes, unresolved
 
+    countback_columns = ["last_6_net", "last_3_net", "last_hole_net"]
     for event_id, event_rows in rows_df.groupby("event_id", sort=False):
         event_rows = event_rows.copy()
         event_name = str(event_rows.iloc[0]["event_name"])
@@ -757,19 +826,44 @@ def build_historical_ranking_reallocation_plan(rows_df):
             int(row["final_position"]): float(row["result_points"])
             for _, row in event_rows.iterrows()
         }
+        score_groups = event_rows.groupby("net_total", dropna=False)
+        missing_countback = any(
+            group[countback_columns].isna().to_numpy().any()
+            for _, group in score_groups
+            if len(group) > 1
+        )
+        if missing_countback:
+            unresolved.append({
+                "Event": event_name,
+                "Event ID": int(event_id),
+                "Reason": (
+                    "Players tied on net total are missing saved hole scores "
+                    "needed for the last-six, last-three, and last-hole countback."
+                )
+            })
+            continue
+
         ordered = event_rows.sort_values(
-            by=["net_total", "player_name"],
-            ascending=[True, True],
+            by=["net_total", *countback_columns, "player_name"],
+            ascending=[True, True, True, True, True],
             kind="stable"
         ).reset_index(drop=True)
 
+        def same_countback(left, right):
+            return (
+                int(left["net_total"]) == int(right["net_total"])
+                and all(
+                    int(left[column]) == int(right[column])
+                    for column in countback_columns
+                )
+            )
+
         index = 0
         while index < player_count:
-            score = int(ordered.iloc[index]["net_total"])
             end_index = index + 1
             while (
                 end_index < player_count
-                and int(ordered.iloc[end_index]["net_total"]) == score
+                and same_countback(ordered.iloc[index], ordered.iloc[end_index])
             ):
                 end_index += 1
 
@@ -825,29 +919,7 @@ def reallocate_closed_event_rankings_to_par():
                 "SELECT id FROM events WHERE status = 'CLOSED' FOR UPDATE"
             )
 
-        rows_df = pd.read_sql_query(
-            """
-            SELECT
-                e.id AS event_id,
-                e.name AS event_name,
-                e.event_date,
-                er.player_id,
-                p.name AS player_name,
-                er.net_total,
-                er.final_position,
-                er.ranking_points AS result_points,
-                rp.points AS ledger_points
-            FROM events e
-            LEFT JOIN event_results er ON er.event_id = e.id
-            LEFT JOIN players p ON p.id = er.player_id
-            LEFT JOIN ranking_points rp
-                ON rp.event_id = er.event_id
-                AND rp.player_id = er.player_id
-            WHERE e.status = 'CLOSED'
-            ORDER BY e.event_date DESC, e.id DESC, er.final_position, p.name
-            """,
-            connection
-        )
+        rows_df = get_closed_event_ranking_rows()
         changes, unresolved = build_historical_ranking_reallocation_plan(rows_df)
 
         with connection.cursor() as cursor:
