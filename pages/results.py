@@ -4,8 +4,14 @@ from pathlib import Path
 import pandas as pd
 
 from database import get_connection
+from auth import is_admin as auth_is_admin
 
-from scoring.scoring_engine import calculate_ips_points
+from scoring.scoring_engine import (
+    calculate_ips_points,
+    calculate_player_round,
+    rank_completed_players,
+    allocate_ranking_points,
+)
 
 
 # ============================================================
@@ -252,6 +258,23 @@ def get_event_results(event_id):
         connection.close()
 
 
+def get_event_par_total(event_id):
+    connection = get_connection()
+    try:
+        result = pd.read_sql_query(
+            """
+            SELECT COALESCE(SUM(par), 0) AS total_par
+            FROM event_holes
+            WHERE event_id = %s
+            """,
+            connection,
+            params=(int(event_id),)
+        )
+        return int(result.iloc[0]["total_par"])
+    finally:
+        connection.close()
+
+
 def ensure_event_player_status_column():
 
     connection = get_connection()
@@ -437,17 +460,230 @@ def get_player_hole_scores(
         connection.close()
 
 
+
+def recalculate_closed_event_after_score_correction(
+    event_id,
+    player_id,
+    hole_number,
+    gross_score
+):
+    """Save one admin correction and rebuild its official results atomically."""
+    if not auth_is_admin():
+        raise PermissionError("Admin access is required to correct completed scores.")
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT status, format
+                FROM events
+                WHERE id = %s
+                FOR UPDATE
+                """,
+                (int(event_id),)
+            )
+            event_row = cursor.fetchone()
+            if event_row is None or event_row[0] != "CLOSED":
+                raise ValueError("Only completed events can be corrected here.")
+
+            cursor.execute(
+                """
+                SELECT 1
+                FROM event_players
+                WHERE event_id = %s AND player_id = %s AND status = 'ACTIVE'
+                """,
+                (int(event_id), int(player_id))
+            )
+            if cursor.fetchone() is None:
+                raise ValueError("The selected player is not active in this event.")
+
+            cursor.execute(
+                """
+                SELECT 1
+                FROM event_holes
+                WHERE event_id = %s AND hole_number = %s
+                """,
+                (int(event_id), int(hole_number))
+            )
+            if cursor.fetchone() is None:
+                raise ValueError("The selected hole is not part of this event.")
+
+            cursor.execute(
+                """
+                INSERT INTO hole_scores
+                    (event_id, player_id, hole_number, gross_score, recorded_by_player_id)
+                VALUES (%s, %s, %s, %s, NULL)
+                ON CONFLICT (event_id, player_id, hole_number)
+                DO UPDATE SET
+                    gross_score = EXCLUDED.gross_score,
+                    recorded_by_player_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(event_id),
+                    int(player_id),
+                    int(hole_number),
+                    int(gross_score)
+                )
+            )
+
+        event_format = str(event_row[1])
+        players_df = pd.read_sql_query(
+            """
+            SELECT ep.player_id, ep.event_handicap, p.name
+            FROM event_players ep
+            INNER JOIN players p ON p.id = ep.player_id
+            WHERE ep.event_id = %s AND ep.status = 'ACTIVE'
+            ORDER BY p.name
+            """,
+            connection,
+            params=(int(event_id),)
+        )
+        holes_df = pd.read_sql_query(
+            """
+            SELECT hole_number, par, stroke_index
+            FROM event_holes
+            WHERE event_id = %s
+            ORDER BY hole_number
+            """,
+            connection,
+            params=(int(event_id),)
+        )
+        scores_df = pd.read_sql_query(
+            """
+            SELECT player_id, hole_number, gross_score
+            FROM hole_scores
+            WHERE event_id = %s
+            """,
+            connection,
+            params=(int(event_id),)
+        )
+        if players_df.empty:
+            raise ValueError("This event has no active players to recalculate.")
+        if len(holes_df) != 18:
+            raise ValueError("This event must have all 18 holes configured.")
+
+        ranking_df = pd.read_sql_query(
+            """
+            SELECT position, points
+            FROM ranking_settings
+            WHERE active = TRUE
+            ORDER BY position
+            """,
+            connection
+        )
+
+        holes = holes_df.to_dict("records")
+        score_dicts = {}
+        for _, score in scores_df.iterrows():
+            score_dicts.setdefault(int(score["player_id"]), {})[
+                int(score["hole_number"])
+            ] = int(score["gross_score"])
+
+        round_results = []
+        for player in players_df.to_dict("records"):
+            player_id = int(player["player_id"])
+            result = calculate_player_round(
+                player,
+                holes,
+                score_dicts.get(player_id, {})
+            )
+            if result["completed"] != 18:
+                raise ValueError(
+                    f"{result['name']} must have 18 saved holes before the event can be recalculated."
+                )
+            round_results.append(result)
+
+        ranked_results = rank_completed_players(round_results, event_format)
+        ranking_points = {
+            int(row["position"]): float(row["points"])
+            for _, row in ranking_df.iterrows()
+        }
+        final_results = allocate_ranking_points(
+            ranked_results,
+            ranking_points,
+            event_format
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM event_results WHERE event_id = %s",
+                (int(event_id),)
+            )
+            cursor.execute(
+                "DELETE FROM ranking_points WHERE event_id = %s",
+                (int(event_id),)
+            )
+
+            for result in final_results:
+                if event_format == "NET":
+                    last_6 = result["last_6_net"]
+                    last_3 = result["last_3_net"]
+                    last_hole = result["last_hole_net"]
+                else:
+                    last_6 = result["last_6_ips"]
+                    last_3 = result["last_3_ips"]
+                    last_hole = result["last_hole_ips"]
+
+                cursor.execute(
+                    """
+                    INSERT INTO event_results
+                        (
+                            event_id, player_id, gross_total, net_total, ips_total,
+                            last_6_score, last_3_score, last_hole_score,
+                            final_position, ranking_points
+                        )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        int(event_id),
+                        int(result["player_id"]),
+                        int(result["gross_total"]),
+                        int(result["net_total"]),
+                        int(result["ips_total"]),
+                        int(last_6),
+                        int(last_3),
+                        int(last_hole),
+                        int(result["final_position"]),
+                        float(result["ranking_points"])
+                    )
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO ranking_points
+                        (season_id, event_id, player_id, points)
+                    SELECT season_id, %s, %s, %s
+                    FROM events
+                    WHERE id = %s
+                    """,
+                    (
+                        int(event_id),
+                        int(result["player_id"]),
+                        float(result["ranking_points"]),
+                        int(event_id)
+                    )
+                )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
 # ============================================================
 # HELPERS
 # ============================================================
 
-def position_label(position):
+def position_label(position, tied=False):
 
     if pd.isna(position):
-
         return "—"
 
     position = int(position)
+    if tied:
+        return f"T{position}"
 
     if position == 1:
         return "🥇 1st"
@@ -459,19 +695,13 @@ def position_label(position):
         return "🥉 3rd"
 
     if position % 100 in (11, 12, 13):
-
         suffix = "th"
-
     else:
-
         suffix = {
             1: "st",
             2: "nd",
             3: "rd"
-        }.get(
-            position % 10,
-            "th"
-        )
+        }.get(position % 10, "th")
 
     return f"{position}{suffix}"
 
@@ -548,6 +778,13 @@ def render_score_table(card, title):
 
     st.markdown(f"### {title}")
     st.markdown(table, unsafe_allow_html=True)
+
+
+def format_to_par(value):
+    if pd.isna(value):
+        return "—"
+    value = int(value)
+    return "E" if value == 0 else f"{value:+d}"
 
 
 def format_score(
@@ -646,6 +883,15 @@ results = get_event_results(
     event_id
 )
 
+if not results.empty:
+    event_par_total = get_event_par_total(event_id)
+    results["to_par"] = results["net_total"] - event_par_total
+    results = results.sort_values(
+        by=["to_par", "final_position", "player_name"],
+        ascending=[True, True, True],
+        kind="stable"
+    ).reset_index(drop=True)
+
 event_players = get_event_players(
     event_id
 )
@@ -666,23 +912,23 @@ if results.empty:
 
 winner = results.iloc[0]
 
-if event["format"] == "IPS":
-
-    winner_score = (
-        f"{int(winner['ips_total'])} IPS"
-    )
-
-else:
-
-    winner_score = (
-        f"{int(winner['net_total'])} Net"
-    )
-
-
-st.success(
-    f"🥇 **{winner['player_name']}** "
-    f"won with **{winner_score}**"
+winner_score = format_to_par(winner["to_par"])
+winner_is_tied = (
+    int((results["final_position"] == winner["final_position"]).sum()) > 1
 )
+if winner_is_tied:
+    tied_winners = results[
+        results["final_position"] == winner["final_position"]
+    ]["player_name"].tolist()
+    st.success(
+        f"🏆 **Tied for first: {', '.join(tied_winners)}** "
+        f"with **{winner_score} to par**"
+    )
+else:
+    st.success(
+        f"🥇 **{winner['player_name']}** "
+        f"won with **{winner_score} to par**"
+    )
 
 st.caption(
     f"+{float(winner['ranking_points']):g} "
@@ -703,17 +949,7 @@ leaderboard_rows = []
 
 for _, row in results.iterrows():
 
-    if event["format"] == "IPS":
-
-        score = (
-            f"{format_score(row['ips_total'])} IPS"
-        )
-
-    else:
-
-        score = (
-            f"{format_score(row['net_total'])} Net"
-        )
+    score = format_to_par(row["to_par"])
 
     gross = format_score(
         row["gross_total"]
@@ -723,7 +959,10 @@ for _, row in results.iterrows():
         {
             "Pos":
                 position_label(
-                    row["final_position"]
+                    row["final_position"],
+                    tied=int(
+                        (results["final_position"] == row["final_position"]).sum()
+                    ) > 1
                 ),
 
             "Player":
@@ -790,6 +1029,86 @@ if holes.empty:
     )
 
     st.stop()
+
+
+if auth_is_admin():
+    st.divider()
+    success_key = f"score_correction_success_{event_id}"
+    if st.session_state.pop(success_key, False):
+        st.success(
+            "Score corrected. Event results and ranking points have been recalculated."
+        )
+
+    with st.expander("🔐 Admin: Correct a completed event score"):
+        st.warning(
+            "Changes are saved to the completed event and its official results "
+            "and ranking points are recalculated immediately."
+        )
+
+        if event_players.empty:
+            st.info("There are no active event players to edit.")
+        else:
+            player_options = {
+                int(row["player_id"]): row["player_name"]
+                for _, row in event_players.iterrows()
+            }
+            correction_player_id = st.selectbox(
+                "Player",
+                options=list(player_options),
+                format_func=lambda player_id: player_options[int(player_id)],
+                key=f"correction_player_{event_id}"
+            )
+            correction_hole = st.selectbox(
+                "Hole",
+                options=list(range(1, 19)),
+                format_func=lambda hole: f"Hole {hole}",
+                key=f"correction_hole_{event_id}_{correction_player_id}"
+            )
+
+            saved_scores = get_player_hole_scores(
+                event_id,
+                correction_player_id,
+                score_column
+            )
+            existing_score_rows = saved_scores[
+                saved_scores["hole_number"] == correction_hole
+            ]
+            existing_score = (
+                int(existing_score_rows.iloc[0]["score"])
+                if not existing_score_rows.empty
+                and pd.notna(existing_score_rows.iloc[0]["score"])
+                else None
+            )
+            st.caption(
+                f"Currently saved: {existing_score if existing_score is not None else 'no score'}"
+            )
+            corrected_score = st.number_input(
+                "Correct gross score",
+                min_value=1,
+                max_value=99,
+                value=existing_score if existing_score is not None else 4,
+                step=1,
+                key=f"correction_score_{event_id}_{correction_player_id}_{correction_hole}"
+            )
+
+            if st.button(
+                "Save correction and recalculate",
+                type="primary",
+                key=f"save_score_correction_{event_id}",
+                use_container_width=True
+            ):
+                try:
+                    recalculate_closed_event_after_score_correction(
+                        event_id,
+                        correction_player_id,
+                        correction_hole,
+                        corrected_score
+                    )
+                    st.session_state[success_key] = True
+                    st.rerun()
+                except Exception as error:
+                    st.error("Unable to correct this event score.")
+                    st.exception(error)
 
 
 # ============================================================
@@ -875,7 +1194,10 @@ for _, result in results.iterrows():
 
 
     position_text = position_label(
-        result["final_position"]
+        result["final_position"],
+        tied=int(
+            (results["final_position"] == result["final_position"]).sum()
+        ) > 1
     )
 
 
