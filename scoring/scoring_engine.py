@@ -368,6 +368,8 @@ def rank_completed_players(
         completed_results,
         key=lambda result: result["net_total"]
     )
+
+
 # ============================================================
 # RANKING POINTS
 # ============================================================
@@ -380,8 +382,8 @@ def allocate_ranking_points(
     """
     Allocate ranking points for the score-to-par order.
 
-    If players are still tied after all net-score tie-breaks,
-    they share the average of the positions occupied.
+    Players with the same net total share the average points
+    for the positions they occupy.
     """
 
     if not ranked_results:
