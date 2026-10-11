@@ -891,6 +891,16 @@ if not results.empty:
         ascending=[True, True, True],
         kind="stable"
     ).reset_index(drop=True)
+    to_par_values = results["to_par"].tolist()
+    tied_positions = {}
+    display_positions = []
+    for index, to_par in enumerate(to_par_values):
+        if to_par not in tied_positions:
+            tied_positions[to_par] = index + 1
+        position = tied_positions[to_par]
+        tied = to_par_values.count(to_par) > 1
+        display_positions.append(position_label(position, tied=tied))
+    results["display_position"] = display_positions
 
 event_players = get_event_players(
     event_id
@@ -914,11 +924,11 @@ winner = results.iloc[0]
 
 winner_score = format_to_par(winner["to_par"])
 winner_is_tied = (
-    int((results["final_position"] == winner["final_position"]).sum()) > 1
+    int((results["to_par"] == winner["to_par"]).sum()) > 1
 )
 if winner_is_tied:
     tied_winners = results[
-        results["final_position"] == winner["final_position"]
+        results["to_par"] == winner["to_par"]
     ]["player_name"].tolist()
     st.success(
         f"🏆 **Tied for first: {', '.join(tied_winners)}** "
@@ -930,10 +940,13 @@ else:
         f"won with **{winner_score} to par**"
     )
 
-st.caption(
-    f"+{float(winner['ranking_points']):g} "
-    "Championship Points"
-)
+if winner_is_tied:
+    st.caption("Championship points for each player are shown in the leaderboard.")
+else:
+    st.caption(
+        f"+{float(winner['ranking_points']):g} "
+        "Championship Points"
+    )
 
 
 # ============================================================
@@ -958,12 +971,7 @@ for _, row in results.iterrows():
     leaderboard_rows.append(
         {
             "Pos":
-                position_label(
-                    row["final_position"],
-                    tied=int(
-                        (results["final_position"] == row["final_position"]).sum()
-                    ) > 1
-                ),
+                row["display_position"],
 
             "Player":
                 row["player_name"],
@@ -1193,12 +1201,7 @@ for _, result in results.iterrows():
         )
 
 
-    position_text = position_label(
-        result["final_position"],
-        tied=int(
-            (results["final_position"] == result["final_position"]).sum()
-        ) > 1
-    )
+    position_text = result["display_position"]
 
 
     with st.expander(
