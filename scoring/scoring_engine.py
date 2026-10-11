@@ -347,44 +347,44 @@ def rank_completed_players(
     event_format
 ):
     """
-    Rank completed players by net score to par.
+    Rank completed players by the event's main competition format.
 
-    If players tie for the lowest net total, use countback to decide first
-    place: last 6 net, last 3 net, then the 18th-hole net score. Ties in
-    every other position remain tied.
+    NET uses lowest net strokes. IPS uses highest IPS points. Countback
+    breaks ties for first only; ties at later positions remain tied.
     """
-
-    completed_results = [
-        result
-        for result in results
-        if result["completed"] == 18
-    ]
+    is_net = str(event_format).upper() == "NET"
+    score_key = "net_total" if is_net else "ips_total"
+    tie_breakers = (
+        ("last_6_net", "last_3_net", "last_hole_net")
+        if is_net else
+        ("last_6_ips", "last_3_ips", "last_hole_ips")
+    )
+    completed = [r for r in results if r["completed"] == 18]
     ranked = sorted(
-        completed_results,
-        key=lambda result: int(result["net_total"])
+        completed,
+        key=lambda r: (
+            int(r[score_key]) if is_net else -int(r[score_key]),
+            str(r.get("name", ""))
+        )
     )
     if not ranked:
         return ranked
 
-    first_score = int(ranked[0]["net_total"])
-    first_group = [
-        result for result in ranked
-        if int(result["net_total"]) == first_score
-    ]
-    remaining = [
-        result for result in ranked
-        if int(result["net_total"]) != first_score
-    ]
+    first_score = int(ranked[0][score_key])
+    first_group = [r for r in ranked if int(r[score_key]) == first_score]
+    remaining = [r for r in ranked if int(r[score_key]) != first_score]
 
     def countback_value(result, key):
         value = result.get(key)
-        return int(value) if value is not None else 999
+        if value is None:
+            return 999 if is_net else -999
+        value = int(value)
+        return value if is_net else -value
 
     first_group.sort(
-        key=lambda result: (
-            countback_value(result, "last_6_net"),
-            countback_value(result, "last_3_net"),
-            countback_value(result, "last_hole_net")
+        key=lambda r: (
+            *(countback_value(r, key) for key in tie_breakers),
+            str(r.get("name", ""))
         )
     )
     return first_group + remaining
@@ -400,54 +400,56 @@ def allocate_ranking_points(
     event_format
 ):
     """
-    Allocate points by net score.
+    Allocate championship points by the event's main format.
 
-    Countback separates a tie for first. Remaining ties share the points
-    for the positions they occupy, regardless of countback scores.
+    Countback separates a tie for first. Other ties share the points for
+    the positions they occupy.
     """
-
     if not ranked_results:
         return []
 
-    output = []
-    index = 0
-    first_score = int(ranked_results[0]["net_total"])
-    tie_breakers = ("last_6_net", "last_3_net", "last_hole_net")
+    is_net = str(event_format).upper() == "NET"
+    score_key = "net_total" if is_net else "ips_total"
+    tie_breakers = (
+        ("last_6_net", "last_3_net", "last_hole_net")
+        if is_net else
+        ("last_6_ips", "last_3_ips", "last_hole_ips")
+    )
+    first_score = int(ranked_results[0][score_key])
 
     def remains_tied(left, right):
-        if int(left["net_total"]) != int(right["net_total"]):
+        left_score = int(left[score_key])
+        right_score = int(right[score_key])
+        if left_score != right_score:
             return False
-        if int(left["net_total"]) != first_score:
+        if left_score != first_score:
             return True
         return all(left.get(key) == right.get(key) for key in tie_breakers)
 
+    output = []
+    index = 0
     while index < len(ranked_results):
-        current = ranked_results[index]
-        tie_group = [current]
+        group = [ranked_results[index]]
         next_index = index + 1
-
-        while next_index < len(ranked_results):
-            other = ranked_results[next_index]
-            if not remains_tied(current, other):
-                break
-            tie_group.append(other)
+        while next_index < len(ranked_results) and remains_tied(
+            group[0], ranked_results[next_index]
+        ):
+            group.append(ranked_results[next_index])
             next_index += 1
 
         first_position = index + 1
-        last_position = first_position + len(tie_group) - 1
+        last_position = first_position + len(group) - 1
         points = [
             float(ranking_points.get(position, 0))
             for position in range(first_position, last_position + 1)
         ]
         average_points = sum(points) / len(points) if points else 0
-
-        for player in tie_group:
-            player_copy = player.copy()
-            player_copy["final_position"] = first_position
-            player_copy["ranking_points"] = average_points
-            output.append(player_copy)
-
+        for player in group:
+            row = player.copy()
+            row["final_position"] = first_position
+            row["ranking_points"] = average_points
+            output.append(row)
         index = next_index
-
     return output
+
 
