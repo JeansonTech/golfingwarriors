@@ -501,8 +501,7 @@ def build_dashboard_scoreboards(players_df, holes_df, scores_df):
         }
         result = calculate_player_round(player, holes, player_scores)
 
-        ips_to_par = 0
-        net_to_par = 0
+        score_to_par = 0
         for hole in holes:
             hole_number = int(hole["hole_number"])
             gross = player_scores.get(hole_number)
@@ -510,19 +509,15 @@ def build_dashboard_scoreboards(players_df, holes_df, scores_df):
                 continue
             par = int(hole["par"])
             stroke_index = int(hole["stroke_index"])
-            ips_to_par += 2 - int(
-                calculate_ips_points(
-                    gross, par, player["event_handicap"], stroke_index
-                )
-            )
-            net_to_par += int(
+            net_score = int(
                 calculate_net_score(
                     gross, player["event_handicap"], stroke_index
                 )
-            ) - par
+            )
+            score_to_par += net_score - par
 
-        result["ips_to_par"] = ips_to_par
-        result["net_to_par"] = net_to_par
+        result["ips_to_par"] = score_to_par
+        result["net_to_par"] = score_to_par
         results.append(result)
 
     def format_to_par(value):
@@ -530,38 +525,40 @@ def build_dashboard_scoreboards(players_df, holes_df, scores_df):
 
     def table_for(score_type):
         if score_type == "IPS":
-            ordered = sorted(
-                results,
-                key=lambda item: (
-                    -item["ips_total"], -item["completed"], item["name"]
-                )
-            )
             value_key = "ips_total"
             to_par_key = "ips_to_par"
             score_label = "IPS"
         else:
-            ordered = sorted(
-                results,
-                key=lambda item: (
-                    item["net_total"], -item["completed"], item["name"]
-                )
-            )
             value_key = "net_total"
             to_par_key = "net_to_par"
             score_label = "Net"
 
-        return pd.DataFrame([
-            {
-                "Pos": position,
+        ordered = sorted(
+            results,
+            key=lambda item: (
+                item[to_par_key], -item["completed"], item["name"]
+            )
+        )
+        to_par_values = [result[to_par_key] for result in ordered]
+        tied_positions = {}
+        rows = []
+        for index, result in enumerate(ordered):
+            to_par = to_par_values[index]
+            if to_par not in tied_positions:
+                tied_positions[to_par] = index + 1
+            position = tied_positions[to_par]
+            tied = to_par_values.count(to_par) > 1
+            rows.append({
+                "Pos": f"T{position}" if tied else position,
                 "Player": result["name"],
                 "HCP": result["handicap"],
                 "Gross": result["gross_total"],
                 "Thru": result["completed"],
-                "To Par": format_to_par(result[to_par_key]),
+                "To Par": format_to_par(to_par),
                 score_label: result[value_key],
-            }
-            for position, result in enumerate(ordered, start=1)
-        ])
+            })
+
+        return pd.DataFrame(rows)
 
     return results, score_lookup, table_for
 
