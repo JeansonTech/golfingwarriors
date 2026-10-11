@@ -920,33 +920,27 @@ if results.empty:
 # WINNER
 # ============================================================
 
-winner = results.iloc[0]
+official_winners = results[
+    results["final_position"] == 1
+]
 
-winner_score = format_to_par(winner["to_par"])
-winner_is_tied = (
-    int((results["to_par"] == winner["to_par"]).sum()) > 1
+if len(official_winners) > 1:
+    official_winner_names = official_winners["player_name"].tolist()
+    st.success(
+        f"🏆 **Tied first in the {event['format']} Main Competition:** "
+        f"{', '.join(official_winner_names)}"
+    )
+else:
+    official_winner = official_winners.iloc[0]
+    st.success(
+        f"🏆 **{official_winner['player_name']}** won the "
+        f"**{event['format']} Main Competition**"
+    )
+
+st.caption(
+    "The leaderboard is ordered by score to par. Points Pos is the "
+    "official Main Competition place used to award championship points."
 )
-if winner_is_tied:
-    tied_winners = results[
-        results["to_par"] == winner["to_par"]
-    ]["player_name"].tolist()
-    st.success(
-        f"🏆 **Tied for first: {', '.join(tied_winners)}** "
-        f"with **{winner_score} to par**"
-    )
-else:
-    st.success(
-        f"🥇 **{winner['player_name']}** "
-        f"won with **{winner_score} to par**"
-    )
-
-if winner_is_tied:
-    st.caption("Championship points for each player are shown in the leaderboard.")
-else:
-    st.caption(
-        f"+{float(winner['ranking_points']):g} "
-        "Championship Points"
-    )
 
 
 # ============================================================
@@ -954,7 +948,7 @@ else:
 # ============================================================
 
 st.subheader(
-    "🏆 Final Leaderboard"
+    "🏆 Final Leaderboard — Sorted by To Par"
 )
 
 
@@ -962,7 +956,12 @@ leaderboard_rows = []
 
 for _, row in results.iterrows():
 
-    score = format_to_par(row["to_par"])
+    points_position = position_label(
+        row["final_position"],
+        tied=int(
+            (results["final_position"] == row["final_position"]).sum()
+        ) > 1
+    )
 
     gross = format_score(
         row["gross_total"]
@@ -970,14 +969,17 @@ for _, row in results.iterrows():
 
     leaderboard_rows.append(
         {
-            "Pos":
+            "To Par Pos":
                 row["display_position"],
+
+            "Points Pos":
+                points_position,
 
             "Player":
                 row["player_name"],
 
-            "Score":
-                score,
+            "To Par":
+                format_to_par(row["to_par"]),
 
             "Gross":
                 gross,
