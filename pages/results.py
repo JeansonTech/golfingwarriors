@@ -1430,9 +1430,7 @@ for _, row in results.iterrows():
                 gross,
 
             "Ranking Points":
-                float(
-                    row["ranking_points"]
-                )
+                f"{float(row['ranking_points']):g}"
         }
     )
 
@@ -1445,14 +1443,7 @@ leaderboard_df = pd.DataFrame(
 st.dataframe(
     leaderboard_df,
     use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Ranking Points":
-            st.column_config.NumberColumn(
-                "Ranking Points",
-                format="%.0f"
-            )
-    }
+    hide_index=True
 )
 
 
