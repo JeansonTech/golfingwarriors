@@ -920,30 +920,32 @@ if results.empty:
 # WINNER
 # ============================================================
 
-official_winners = results[
-    results["final_position"] == 1
-]
+winner = results.iloc[0]
 
-if len(official_winners) > 1:
-    official_winner_names = official_winners["player_name"].tolist()
+winner_score = format_to_par(winner["to_par"])
+winner_is_tied = (
+    int((results["to_par"] == winner["to_par"]).sum()) > 1
+)
+if winner_is_tied:
+    tied_winners = results[
+        results["to_par"] == winner["to_par"]
+    ]["player_name"].tolist()
     st.success(
-        f"🏆 **Tied first in the {event['format']} Main Competition:** "
-        f"{', '.join(official_winner_names)}"
+        f"🏆 **Tied for first: {', '.join(tied_winners)}** "
+        f"with **{winner_score} to par**"
     )
 else:
-    official_winner = official_winners.iloc[0]
     st.success(
-        f"🏆 **{official_winner['player_name']}** won the "
-        f"**{event['format']} Main Competition**"
+        f"🥇 **{winner['player_name']}** "
+        f"won with **{winner_score} to par**"
     )
 
 st.caption(
-    "The leaderboard is ordered by score to par. Points Pos is the "
-    "official Main Competition place used to award championship points."
+    "Finishing positions and championship points are based on net score to par. "
+    "The IPS column shows each player's Stableford-style total."
 )
 
 
-# ============================================================
 # RESULT LEADERBOARD
 # ============================================================
 
@@ -956,12 +958,7 @@ leaderboard_rows = []
 
 for _, row in results.iterrows():
 
-    points_position = position_label(
-        row["final_position"],
-        tied=int(
-            (results["final_position"] == row["final_position"]).sum()
-        ) > 1
-    )
+    score = format_to_par(row["to_par"])
 
     gross = format_score(
         row["gross_total"]
@@ -969,22 +966,22 @@ for _, row in results.iterrows():
 
     leaderboard_rows.append(
         {
-            "To Par Pos":
+            "Pos":
                 row["display_position"],
-
-            "Points Pos":
-                points_position,
 
             "Player":
                 row["player_name"],
 
             "To Par":
-                format_to_par(row["to_par"]),
+                score,
+
+            "IPS Pts":
+                int(row["ips_total"]),
 
             "Gross":
                 gross,
 
-            "Points":
+            "Ranking Points":
                 float(
                     row["ranking_points"]
                 )
@@ -1002,9 +999,9 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     column_config={
-        "Points":
+        "Ranking Points":
             st.column_config.NumberColumn(
-                "Points",
+                "Ranking Points",
                 format="%.0f"
             )
     }
