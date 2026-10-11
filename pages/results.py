@@ -8,6 +8,7 @@ from auth import is_admin as auth_is_admin
 
 from scoring.scoring_engine import (
     calculate_ips_points,
+    calculate_net_score,
     calculate_player_round,
     rank_completed_players,
     allocate_ranking_points,
@@ -420,6 +421,119 @@ def get_event_holes(event_id):
 
         connection.close()
 
+
+def get_match_play_results(event_id):
+    """Rebuild Match Play outcomes for a completed event from saved scores."""
+    connection = get_connection()
+    try:
+        competitions = pd.read_sql_query(
+            "SELECT competition_code FROM event_competitions WHERE event_id = %s",
+            connection,
+            params=(int(event_id),)
+        )
+        match_rows = pd.read_sql_query(
+            """
+            SELECT
+                m.match_number,
+                m.match_type,
+                s.side_number,
+                sp.player_id,
+                p.name AS player_name,
+                ep.event_handicap
+            FROM match_play_matches m
+            INNER JOIN match_play_sides s ON s.match_id = m.id
+            INNER JOIN match_play_side_players sp ON sp.side_id = s.id
+            INNER JOIN players p ON p.id = sp.player_id
+            INNER JOIN event_players ep
+                ON ep.event_id = m.event_id AND ep.player_id = sp.player_id
+            WHERE m.event_id = %s
+            ORDER BY m.match_number, s.side_number, p.name
+            """,
+            connection,
+            params=(int(event_id),)
+        )
+        holes = pd.read_sql_query(
+            "SELECT hole_number, stroke_index FROM event_holes WHERE event_id = %s ORDER BY hole_number",
+            connection,
+            params=(int(event_id),)
+        )
+        scores = pd.read_sql_query(
+            "SELECT player_id, hole_number, gross_score FROM hole_scores WHERE event_id = %s",
+            connection,
+            params=(int(event_id),)
+        )
+    finally:
+        connection.close()
+
+    if match_rows.empty:
+        return competitions, []
+
+    score_lookup = {
+        (int(row.player_id), int(row.hole_number)): int(row.gross_score)
+        for row in scores.itertuples(index=False)
+        if pd.notna(row.gross_score)
+    }
+    match_results = []
+    for match_number, match in match_rows.groupby("match_number", sort=True):
+        players_by_side = {
+            side: [row for row in match.to_dict("records") if int(row["side_number"]) == side]
+            for side in (1, 2)
+        }
+        all_players = players_by_side[1] + players_by_side[2]
+        if not all(players_by_side.values()) or not all_players:
+            continue
+
+        lowest_handicap = min(float(player["event_handicap"]) for player in all_players)
+        adjusted_handicaps = {
+            int(player["player_id"]): max(0.0, float(player["event_handicap"]) - lowest_handicap)
+            for player in all_players
+        }
+        hole_margin = 0
+        holes_played = 0
+        for hole in holes.itertuples(index=False):
+            hole_number = int(hole.hole_number)
+            if any((int(player["player_id"]), hole_number) not in score_lookup for player in all_players):
+                continue
+            side_scores = {}
+            for side in (1, 2):
+                net_scores = [
+                    calculate_net_score(
+                        score_lookup[(int(player["player_id"]), hole_number)],
+                        adjusted_handicaps[int(player["player_id"])],
+                        int(hole.stroke_index)
+                    )
+                    for player in players_by_side[side]
+                ]
+                side_scores[side] = min(net_scores)
+            hole_margin += (side_scores[2] > side_scores[1]) - (side_scores[2] < side_scores[1])
+            holes_played += 1
+
+        remaining = max(0, 18 - holes_played)
+        margin = abs(hole_margin)
+        if holes_played >= 18 or margin > remaining:
+            if hole_margin > 0:
+                outcome = f"Side 1 wins {margin} & {remaining}"
+            elif hole_margin < 0:
+                outcome = f"Side 2 wins {margin} & {remaining}"
+            else:
+                outcome = "Halved"
+        elif holes_played == 0:
+            outcome = "No holes scored"
+        else:
+            outcome = "In progress"
+
+        def side_names(side):
+            return " & ".join(player["player_name"] for player in players_by_side[side])
+
+        match_results.append({
+            "Match": int(match_number),
+            "Type": "Teams" if str(match.iloc[0]["match_type"]).upper() == "TEAMS" else "Singles",
+            "Side 1": side_names(1),
+            "Result": outcome,
+            "Side 2": side_names(2),
+            "Holes": f"{holes_played}/18",
+        })
+    return competitions, match_results
 
 def get_player_hole_scores(
     event_id,
@@ -1430,6 +1544,34 @@ if auth_is_admin():
                     use_container_width=True,
                     hide_index=True
                 )
+
+
+# Completed side-game standings, kept separate from official points.
+try:
+    event_competitions, match_play_results = get_match_play_results(event_id)
+except Exception:
+    event_competitions = pd.DataFrame(columns=["competition_code"])
+    match_play_results = []
+    st.warning("Match Play results could not be loaded for this event.")
+
+if (
+    "MATCH_PLAY" in set(event_competitions.get("competition_code", []))
+    or match_play_results
+):
+    st.divider()
+    st.subheader("⚔️ Match Play Results")
+    st.caption(
+        "Side game results are shown separately. Championship ranking points "
+        "continue to come from the event’s main competition."
+    )
+    if not match_play_results:
+        st.info("No Match Play matches are configured for this event.")
+    else:
+        st.dataframe(
+            pd.DataFrame(match_play_results),
+            use_container_width=True,
+            hide_index=True
+        )
 
 
 # ============================================================
