@@ -422,6 +422,37 @@ def get_event_holes(event_id):
         connection.close()
 
 
+def calculate_match_play_outcome(hole_diffs, total_holes=18):
+    """Return the match result at the hole it is first decided."""
+    total_holes = max(1, int(total_holes))
+    margin = 0
+    holes_played = 0
+
+    for hole_diff in hole_diffs:
+        margin += int(hole_diff)
+        holes_played += 1
+        remaining = max(0, total_holes - holes_played)
+
+        if margin > remaining:
+            result = f"Side 1 wins {margin} & {remaining}"
+            return {"result": result, "holes_played": holes_played, "total_holes": total_holes}
+        if margin < -remaining:
+            result = f"Side 2 wins {abs(margin)} & {remaining}"
+            return {"result": result, "holes_played": holes_played, "total_holes": total_holes}
+
+        if holes_played >= total_holes:
+            if margin > 0:
+                result = f"Side 1 wins {margin} & 0"
+            elif margin < 0:
+                result = f"Side 2 wins {abs(margin)} & 0"
+            else:
+                result = "Halved"
+            return {"result": result, "holes_played": holes_played, "total_holes": total_holes}
+
+    result = "No holes scored" if holes_played == 0 else "In progress"
+    return {"result": result, "holes_played": holes_played, "total_holes": total_holes}
+
+
 def get_match_play_results(event_id):
     """Rebuild Match Play outcomes for a completed event from saved scores."""
     connection = get_connection()
@@ -488,12 +519,15 @@ def get_match_play_results(event_id):
             int(player["player_id"]): max(0.0, float(player["event_handicap"]) - lowest_handicap)
             for player in all_players
         }
-        hole_margin = 0
-        holes_played = 0
+        hole_diffs = []
         for hole in holes.itertuples(index=False):
             hole_number = int(hole.hole_number)
-            if any((int(player["player_id"]), hole_number) not in score_lookup for player in all_players):
+            if any(
+                (int(player["player_id"]), hole_number) not in score_lookup
+                for player in all_players
+            ):
                 continue
+
             side_scores = {}
             for side in (1, 2):
                 net_scores = [
@@ -505,23 +539,18 @@ def get_match_play_results(event_id):
                     for player in players_by_side[side]
                 ]
                 side_scores[side] = min(net_scores)
-            hole_margin += (side_scores[2] > side_scores[1]) - (side_scores[2] < side_scores[1])
-            holes_played += 1
 
-        remaining = max(0, 18 - holes_played)
-        margin = abs(hole_margin)
-        if holes_played >= 18 or margin > remaining:
-            if hole_margin > 0:
-                outcome = f"Side 1 wins {margin} & {remaining}"
-            elif hole_margin < 0:
-                outcome = f"Side 2 wins {margin} & {remaining}"
+            if side_scores[1] < side_scores[2]:
+                hole_diffs.append(1)
+            elif side_scores[2] < side_scores[1]:
+                hole_diffs.append(-1)
             else:
-                outcome = "Halved"
-        elif holes_played == 0:
-            outcome = "No holes scored"
-        else:
-            outcome = "In progress"
+                hole_diffs.append(0)
 
+        outcome = calculate_match_play_outcome(
+            hole_diffs,
+            total_holes=len(holes) if not holes.empty else 18
+        )
         def side_names(side):
             return " & ".join(player["player_name"] for player in players_by_side[side])
 
@@ -529,9 +558,9 @@ def get_match_play_results(event_id):
             "Match": int(match_number),
             "Type": "Teams" if str(match.iloc[0]["match_type"]).upper() == "TEAMS" else "Singles",
             "Side 1": side_names(1),
-            "Result": outcome,
+            "Result": outcome["result"],
             "Side 2": side_names(2),
-            "Holes": f"{holes_played}/18",
+            "Holes": f"{outcome['holes_played']}/{outcome['total_holes']}",
         })
     return competitions, match_results
 
