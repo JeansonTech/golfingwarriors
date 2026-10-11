@@ -2015,17 +2015,30 @@ if all_complete:
                 )
 
 
-                for result in final_results:
+                display_results = sorted(
+                    final_results,
+                    key=lambda result: (
+                        int(result["net_total"]) - event_par_total,
+                        result["name"]
+                    )
+                )
+                display_to_par = [
+                    int(result["net_total"]) - event_par_total
+                    for result in display_results
+                ]
+                tied_positions = {}
+
+                for index, result in enumerate(display_results):
+                    to_par = display_to_par[index]
+                    if to_par not in tied_positions:
+                        tied_positions[to_par] = index + 1
+                    position = tied_positions[to_par]
+                    tied = display_to_par.count(to_par) > 1
 
                     result_rows.append(
                         {
                             "Position":
-                                f"T{result['final_position']}"
-                                if sum(
-                                    item["final_position"] == result["final_position"]
-                                    for item in final_results
-                                ) > 1
-                                else result["final_position"],
+                                f"T{position}" if tied else position,
 
                             "Player":
                                 result["name"],
@@ -2034,9 +2047,7 @@ if all_complete:
                                 result["gross_total"],
 
                             "To Par":
-                                format_to_par(
-                                    int(result["net_total"]) - event_par_total
-                                ),
+                                format_to_par(to_par),
 
                             "Net":
                                 result["net_total"],
