@@ -672,6 +672,226 @@ def recalculate_closed_event_after_score_correction(
     finally:
         connection.close()
 
+def get_closed_event_ranking_rows():
+    connection = get_connection()
+    try:
+        return pd.read_sql_query(
+            """
+            SELECT
+                e.id AS event_id,
+                e.name AS event_name,
+                e.event_date,
+                er.player_id,
+                p.name AS player_name,
+                er.net_total,
+                er.final_position,
+                er.ranking_points AS result_points,
+                rp.points AS ledger_points
+            FROM events e
+            LEFT JOIN event_results er ON er.event_id = e.id
+            LEFT JOIN players p ON p.id = er.player_id
+            LEFT JOIN ranking_points rp
+                ON rp.event_id = er.event_id
+                AND rp.player_id = er.player_id
+            WHERE e.status = 'CLOSED'
+            ORDER BY e.event_date DESC, e.id DESC, er.final_position, p.name
+            """,
+            connection
+        )
+    finally:
+        connection.close()
+
+
+def build_historical_ranking_reallocation_plan(rows_df):
+    """Re-rank closed events by net-to-par while preserving each event's point scale."""
+    changes = []
+    unresolved = []
+
+    if rows_df.empty:
+        return changes, unresolved
+
+    for event_id, event_rows in rows_df.groupby("event_id", sort=False):
+        event_rows = event_rows.copy()
+        event_name = str(event_rows.iloc[0]["event_name"])
+        saved_positions = pd.to_numeric(
+            event_rows["final_position"],
+            errors="coerce"
+        )
+        saved_points = pd.to_numeric(
+            event_rows["result_points"],
+            errors="coerce"
+        )
+
+        player_count = len(event_rows)
+        if (
+            event_rows["player_id"].isna().any()
+            or pd.to_numeric(event_rows["net_total"], errors="coerce").isna().any()
+        ):
+            unresolved.append({
+                "Event": event_name,
+                "Event ID": int(event_id),
+                "Reason": "The closed event is missing a complete result row."
+            })
+            continue
+
+        position_values = [
+            int(value) for value in saved_positions if pd.notna(value)
+        ]
+        if (
+            len(position_values) != player_count
+            or len(set(position_values)) != player_count
+            or sorted(position_values) != list(range(1, player_count + 1))
+            or saved_points.isna().any()
+        ):
+            unresolved.append({
+                "Event": event_name,
+                "Event ID": int(event_id),
+                "Reason": (
+                    "Existing places include ties, gaps, or missing values; "
+                    "the historical point scale cannot be reconstructed safely."
+                )
+            })
+            continue
+
+        points_by_position = {
+            int(row["final_position"]): float(row["result_points"])
+            for _, row in event_rows.iterrows()
+        }
+        ordered = event_rows.sort_values(
+            by=["net_total", "player_name"],
+            ascending=[True, True],
+            kind="stable"
+        ).reset_index(drop=True)
+
+        index = 0
+        while index < player_count:
+            score = int(ordered.iloc[index]["net_total"])
+            end_index = index + 1
+            while (
+                end_index < player_count
+                and int(ordered.iloc[end_index]["net_total"]) == score
+            ):
+                end_index += 1
+
+            first_position = index + 1
+            occupied_positions = range(first_position, end_index + 1)
+            allocated_points = sum(
+                points_by_position[position]
+                for position in occupied_positions
+            ) / (end_index - index)
+
+            for row_index in range(index, end_index):
+                row = ordered.iloc[row_index]
+                new_position = first_position
+                new_points = allocated_points
+                old_position = int(row["final_position"])
+                old_points = float(row["result_points"])
+                ledger_value = row["ledger_points"]
+                ledger_mismatch = (
+                    pd.isna(ledger_value)
+                    or abs(float(ledger_value) - old_points) > 0.0001
+                )
+                if (
+                    old_position != new_position
+                    or abs(old_points - new_points) > 0.0001
+                    or ledger_mismatch
+                ):
+                    changes.append({
+                        "Event": event_name,
+                        "Event ID": int(event_id),
+                        "Player ID": int(row["player_id"]),
+                        "Player": row["player_name"],
+                        "Old Pos": old_position,
+                        "New Pos": new_position,
+                        "Old Points": old_points,
+                        "New Points": new_points,
+                        "Old Ledger Points": ledger_value
+                    })
+
+            index = end_index
+
+    return changes, unresolved
+
+
+def reallocate_closed_event_rankings_to_par():
+    """Update all safely reconstructable closed events to score-to-par places."""
+    if not auth_is_admin():
+        raise PermissionError("Admin access is required to recalculate event rankings.")
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM events WHERE status = 'CLOSED' FOR UPDATE"
+            )
+
+        rows_df = pd.read_sql_query(
+            """
+            SELECT
+                e.id AS event_id,
+                e.name AS event_name,
+                e.event_date,
+                er.player_id,
+                p.name AS player_name,
+                er.net_total,
+                er.final_position,
+                er.ranking_points AS result_points,
+                rp.points AS ledger_points
+            FROM events e
+            LEFT JOIN event_results er ON er.event_id = e.id
+            LEFT JOIN players p ON p.id = er.player_id
+            LEFT JOIN ranking_points rp
+                ON rp.event_id = er.event_id
+                AND rp.player_id = er.player_id
+            WHERE e.status = 'CLOSED'
+            ORDER BY e.event_date DESC, e.id DESC, er.final_position, p.name
+            """,
+            connection
+        )
+        changes, unresolved = build_historical_ranking_reallocation_plan(rows_df)
+
+        with connection.cursor() as cursor:
+            for row in changes:
+                cursor.execute(
+                    """
+                    UPDATE event_results
+                    SET final_position = %s, ranking_points = %s
+                    WHERE event_id = %s AND player_id = %s
+                    """,
+                    (
+                        int(row["New Pos"]),
+                        float(row["New Points"]),
+                        int(row["Event ID"]),
+                        int(row["Player ID"])
+                    )
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO ranking_points
+                        (season_id, event_id, player_id, points)
+                    SELECT season_id, %s, %s, %s
+                    FROM events
+                    WHERE id = %s
+                    ON CONFLICT (event_id, player_id)
+                    DO UPDATE SET points = EXCLUDED.points
+                    """,
+                    (
+                        int(row["Event ID"]),
+                        int(row["Player ID"]),
+                        float(row["New Points"]),
+                        int(row["Event ID"])
+                    )
+                )
+
+        connection.commit()
+        return changes, unresolved
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -940,21 +1160,17 @@ else:
         f"won with **{winner_score} to par**"
     )
 
-if winner_is_tied:
-    st.caption("Championship points for each player are shown in the leaderboard.")
-else:
-    st.caption(
-        f"+{float(winner['ranking_points']):g} "
-        "Championship Points"
-    )
+st.caption(
+    "Finishing positions and championship points are based on net score to par. "
+    "The IPS column shows each player's Stableford-style total."
+)
 
 
-# ============================================================
 # RESULT LEADERBOARD
 # ============================================================
 
 st.subheader(
-    "🏆 Final Leaderboard"
+    "🏆 Final Leaderboard — Sorted by To Par"
 )
 
 
@@ -976,13 +1192,16 @@ for _, row in results.iterrows():
             "Player":
                 row["player_name"],
 
-            "Score":
+            "To Par":
                 score,
+
+            "IPS Pts":
+                int(row["ips_total"]),
 
             "Gross":
                 gross,
 
-            "Points":
+            "Ranking Points":
                 float(
                     row["ranking_points"]
                 )
@@ -1000,13 +1219,98 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
     column_config={
-        "Points":
+        "Ranking Points":
             st.column_config.NumberColumn(
-                "Points",
+                "Ranking Points",
                 format="%.0f"
             )
     }
 )
+
+
+if auth_is_admin():
+    with st.expander("🔎 Admin: Audit past event ranking points"):
+        st.info(
+            "This checks every completed event. It reorders positions by net score "
+            "to par and preserves each event's recorded points-per-place scale. "
+            "Events with old tied, missing, or incomplete places are flagged for "
+            "review instead of being changed automatically."
+        )
+        preview_key = "historical_ranking_to_par_preview"
+        if st.button(
+            "Preview all completed events",
+            key="preview_historical_ranking_to_par",
+            use_container_width=True
+        ):
+            history_rows = get_closed_event_ranking_rows()
+            changes, unresolved = build_historical_ranking_reallocation_plan(
+                history_rows
+            )
+            st.session_state[preview_key] = {
+                "changes": changes,
+                "unresolved": unresolved
+            }
+
+        preview = st.session_state.get(preview_key)
+        if preview is not None:
+            changes = preview["changes"]
+            unresolved = preview["unresolved"]
+
+            if changes:
+                st.warning(
+                    f"{len(changes)} player result(s) need updated positions "
+                    "or ranking points."
+                )
+                st.dataframe(
+                    pd.DataFrame(changes)[
+                        [
+                            "Event", "Player", "Old Pos", "New Pos",
+                            "Old Points", "New Points", "Old Ledger Points"
+                        ]
+                    ],
+                    use_container_width=True,
+                    hide_index=True
+                )
+                if st.button(
+                    "Apply score-to-par places to the listed events",
+                    type="primary",
+                    key="apply_historical_ranking_to_par",
+                    use_container_width=True
+                ):
+                    try:
+                        applied, still_unresolved = (
+                            reallocate_closed_event_rankings_to_par()
+                        )
+                        st.session_state.pop(preview_key, None)
+                        st.success(
+                            f"Updated {len(applied)} player result(s) across "
+                            "completed events."
+                        )
+                        if still_unresolved:
+                            st.warning(
+                                f"{len(still_unresolved)} event(s) still need "
+                                "manual review because their former point scale "
+                                "could not be reconstructed safely."
+                            )
+                        st.rerun()
+                    except Exception as error:
+                        st.error("Unable to update historical event rankings.")
+                        st.exception(error)
+            else:
+                st.success(
+                    "No safely reconstructable completed-event rows need changes."
+                )
+
+            if unresolved:
+                st.warning(
+                    "Some events have existing ties, missing places, or incomplete "
+                    "results. They were not changed automatically."
+                )
+                st.dataframe(
+                    pd.DataFrame(unresolved),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
 
 # ============================================================
