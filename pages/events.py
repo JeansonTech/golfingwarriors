@@ -1,10 +1,8 @@
 import streamlit as st
 from pathlib import Path
 import pandas as pd
-import os
-
 from database import get_connection
-from auth import is_admin as auth_is_admin
+from auth import can_manage_events, is_admin as auth_is_admin
 
 
 st.set_page_config(
@@ -970,98 +968,6 @@ def delete_event(event_id):
 # ADMIN MODE
 # ============================================================
 
-def get_admin_password():
-    """
-    Read the admin password from Streamlit secrets first,
-    then from the Railway environment variable.
-    """
-    try:
-        password = st.secrets.get(
-            "GOLFING_WARRIORS_ADMIN_PASSWORD",
-            ""
-        )
-    except Exception:
-        password = ""
-
-    if password:
-        return password
-
-    return os.getenv(
-        "GOLFING_WARRIORS_ADMIN_PASSWORD",
-        ""
-    )
-
-
-def render_admin_mode():
-    """
-    Simple session-based admin login.
-
-    The password is never stored in this Python file.
-    """
-
-    st.sidebar.divider()
-    st.sidebar.subheader("🔐 Admin")
-
-    if st.session_state.get(
-        "golfing_warriors_admin",
-        False
-    ):
-
-        st.sidebar.success(
-            "🟢 Admin Mode Active"
-        )
-
-        if st.sidebar.button(
-            "🔓 Exit Admin Mode",
-            use_container_width=True
-        ):
-
-            st.session_state[
-                "golfing_warriors_admin"
-            ] = False
-
-            st.rerun()
-
-        return True
-
-    password = st.sidebar.text_input(
-        "Admin Password",
-        type="password",
-        key="golfing_warriors_admin_password"
-    )
-
-    if st.sidebar.button(
-        "🔐 Enter Admin Mode",
-        use_container_width=True
-    ):
-
-        configured_password = get_admin_password()
-
-        if (
-            configured_password
-            and password == configured_password
-        ):
-
-            st.session_state[
-                "golfing_warriors_admin"
-            ] = True
-
-            st.session_state.pop(
-                "golfing_warriors_admin_password",
-                None
-            )
-
-            st.rerun()
-
-        else:
-
-            st.sidebar.error(
-                "Incorrect admin password."
-            )
-
-    return False
-
-
 # Ensure per-event player status exists before the page uses it.
 try:
     ensure_event_player_status_column()
@@ -1119,7 +1025,10 @@ st.caption(
     "Create and manage Golfing Warriors events."
 )
 
-is_admin = render_admin_mode()
+is_admin = auth_is_admin()
+if not can_manage_events():
+    st.info("Sign in with Organizer Access or Admin Access to create and manage events.")
+    st.stop()
 
 st.divider()
 
