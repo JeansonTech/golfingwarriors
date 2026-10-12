@@ -842,6 +842,36 @@ hole_data["to_par"] = (
     - hole_data["par"]
 )
 
+# Prepare an all-golfer comparison using the selected season, course, and
+# event filters. The golfer filter is intentionally ignored for this table.
+scoring_leader_data = hole_data.copy()
+if selected_player_id is not None:
+    try:
+        scoring_leader_data = get_hole_statistics(
+            player_id=None,
+            season_id=selected_season_id,
+            course_id=selected_course_id,
+            event_id=selected_event_id,
+            score_column=score_column
+        )
+        scoring_leader_data["score"] = pd.to_numeric(
+            scoring_leader_data["score"], errors="coerce"
+        )
+        scoring_leader_data["par"] = pd.to_numeric(
+            scoring_leader_data["par"], errors="coerce"
+        )
+        scoring_leader_data = scoring_leader_data.dropna(subset=["score", "par"])
+        scoring_leader_data["to_par"] = (
+            scoring_leader_data["score"] - scoring_leader_data["par"]
+        )
+    except Exception as error:
+        scoring_leader_data = pd.DataFrame({
+            "player_name": pd.Series(dtype=str),
+            "to_par": pd.Series(dtype=float)
+        })
+        st.warning("Scoring leaders could not be loaded for the selected filters.")
+
+
 
 # ============================================================
 # SUMMARY METRICS
@@ -913,9 +943,15 @@ metric1, metric2 = st.columns(2)
 
 with metric1:
 
+    rounds_count = (
+        hole_data[["event_id", "player_id"]]
+        .drop_duplicates()
+        .shape[0]
+    )
+    round_label = "Round" if rounds_count == 1 else "Rounds"
     st.metric(
         "⛳ Holes Scored",
-        total_holes
+        f"{total_holes} ({rounds_count} {round_label})"
     )
 
 with metric2:
@@ -979,6 +1015,54 @@ st.dataframe(
     use_container_width=True,
     hide_index=True
 )
+
+
+# ============================================================
+# SCORING LEADERS
+# ============================================================
+
+st.divider()
+st.header("🏅 Scoring Leaders")
+st.caption(
+    "Compares all golfers using the selected season, course, and event filters; "
+    "the Golfer filter does not limit this table. Ties for most are shown together."
+)
+
+leader_categories = [
+    ("🦅 Eagles or Better", scoring_leader_data["to_par"] <= -2),
+    ("🐦 Birdies", scoring_leader_data["to_par"] == -1),
+    ("😬 Bogeys", scoring_leader_data["to_par"] == 1),
+    ("💀 Double Bogey or Worse", scoring_leader_data["to_par"] >= 2),
+]
+leader_rows = []
+for category, mask in leader_categories:
+    category_scores = scoring_leader_data.loc[mask]
+    counts_by_player = category_scores.groupby("player_name").size()
+    if counts_by_player.empty or int(counts_by_player.max()) == 0:
+        leader_rows.append({
+            "Scoring Category": category,
+            "Leader(s)": "—",
+            "Count": 0
+        })
+        continue
+    top_count = int(counts_by_player.max())
+    leaders = sorted(
+        str(name) for name in counts_by_player[counts_by_player == top_count].index
+    )
+    leader_rows.append({
+        "Scoring Category": category,
+        "Leader(s)": ", ".join(leaders),
+        "Count": top_count
+    })
+
+if scoring_leader_data.empty:
+    st.info("No scores are available for the selected season, course, or event.")
+else:
+    st.dataframe(
+        pd.DataFrame(leader_rows),
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 # ============================================================
