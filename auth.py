@@ -40,6 +40,88 @@ def get_admin_password():
     )
 
 
+ORGANIZER_SESSION_KEY = "golfing_warriors_organizer"
+ORGANIZER_PASSWORD_KEY = "GOLFING_WARRIORS_ORGANIZER_PASSWORD"
+
+
+def get_organizer_password():
+    """Return the configured shared organizer password."""
+    try:
+        password = st.secrets.get(ORGANIZER_PASSWORD_KEY, "")
+    except Exception:
+        password = ""
+    if password:
+        return str(password)
+    return os.getenv(ORGANIZER_PASSWORD_KEY, "")
+
+
+def is_organizer():
+    """Return True when the current session has organizer access."""
+    return bool(st.session_state.get(ORGANIZER_SESSION_KEY, False))
+
+
+def can_manage_events():
+    """Admins retain full access; organizers can manage events only."""
+    return is_admin() or is_organizer()
+
+
+def login_organizer(password):
+    """Authenticate an event organizer for this Streamlit session."""
+    configured_password = get_organizer_password()
+    if not configured_password:
+        return False
+    if hmac.compare_digest(str(password), str(configured_password)):
+        st.session_state[ORGANIZER_SESSION_KEY] = True
+        st.session_state.pop("golfing_warriors_organizer_password", None)
+        return True
+    return False
+
+
+def logout_organizer():
+    """End the current organizer session."""
+    st.session_state[ORGANIZER_SESSION_KEY] = False
+    st.session_state.pop("golfing_warriors_organizer_password", None)
+
+
+def render_organizer_sidebar():
+    """Render event-organizer login/logout controls."""
+    if is_admin():
+        return
+
+    st.sidebar.divider()
+    st.sidebar.subheader("📅 Organizer Access")
+    if is_organizer():
+        st.sidebar.success("🟢 Organizer Mode Active")
+        if st.sidebar.button(
+            "🔓 Exit Organizer Mode",
+            use_container_width=True,
+            key="gw_organizer_logout",
+        ):
+            logout_organizer()
+            st.rerun()
+        return
+
+    password = st.sidebar.text_input(
+        "Organizer Password",
+        type="password",
+        key="golfing_warriors_organizer_password",
+    )
+    if st.sidebar.button(
+        "📅 Enter Organizer Mode",
+        use_container_width=True,
+        key="gw_organizer_login",
+    ):
+        if login_organizer(password):
+            st.rerun()
+        if get_organizer_password():
+            st.sidebar.error("Incorrect organizer password.")
+        else:
+            st.sidebar.error(
+                "Organizer password is not configured. Set "
+                "GOLFING_WARRIORS_ORGANIZER_PASSWORD in Railway."
+            )
+
+
 def is_admin():
     """Return True when the current session is authenticated."""
 
@@ -184,44 +266,29 @@ def render_app_sidebar():
     )
 
     # ========================================================
+    # EVENT MANAGEMENT
+    # ========================================================
+
+    if can_manage_events():
+        st.sidebar.markdown("### 📅 EVENT MANAGEMENT")
+        st.sidebar.page_link(EVENTS, label="Events")
+
+    # ========================================================
     # ADMINISTRATION
     # ========================================================
 
     if is_admin():
-
-        st.sidebar.markdown(
-            "### ⚙️ ADMINISTRATION"
-        )
-
-        st.sidebar.page_link(
-            PLAYERS,
-            label="Players"
-        )
-
-        st.sidebar.page_link(
-            COURSES,
-            label="Courses"
-        )
-
-        st.sidebar.page_link(
-            EVENTS,
-            label="Events"
-        )
-
-        st.sidebar.page_link(
-            SEASONS,
-            label="Seasons"
-        )
-
-        st.sidebar.page_link(
-            RANKING_SETTINGS,
-            label="Ranking Settings"
-        )
+        st.sidebar.markdown("### ⚙️ ADMINISTRATION")
+        st.sidebar.page_link(PLAYERS, label="Players")
+        st.sidebar.page_link(COURSES, label="Courses")
+        st.sidebar.page_link(SEASONS, label="Seasons")
+        st.sidebar.page_link(RANKING_SETTINGS, label="Ranking Settings")
 
     # ========================================================
-    # ADMIN ACCESS
+    # ROLE ACCESS
     # ========================================================
 
+    render_organizer_sidebar()
     render_admin_sidebar()
 
 
